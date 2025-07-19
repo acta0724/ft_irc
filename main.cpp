@@ -7,6 +7,7 @@
 #include <sstream>
 #include <string>
 #include <cerrno>
+#include <map>
 
 #ifndef nullptr
 # define nullptr (0)
@@ -62,19 +63,19 @@ public:
     server_address.sin_addr.s_addr = INADDR_ANY;
 
     if (bind(listen_fd_, (struct sockaddr *)&server_address, sizeof(server_address)) == -1) {
-      perror("setsockopt");
+      perror("bind");
       close(listen_fd_);
       return false;
     }
     if (listen(listen_fd_, SOMAXCONN) == -1) {
-      perror("setsockopt");
+      perror("listen");
       close(listen_fd_);
       return false;
     }
 
     epoll_fd_ = epoll_create1(0);
     if (epoll_fd_ == -1) {
-      perror("setsockopt");
+      perror("epoll_create1");
       close(listen_fd_);
       return false;
     }
@@ -111,28 +112,52 @@ public:
           acceptNewClient();
         } else {
           int client_fd = events[i].data.fd;
-          if (events[i].events & EPOLLERR || events[i].events & EPOLLHUP || events[i].events & EPOLLRDHUP) {
-            std::clog << "Client disconnected or error. fd: " << client_fd
-                      << ", event: " << get_event_flags(events[i].events) << std::endl;
-            epoll_ctl(epoll_fd_, EPOLL_CTL_DEL, client_fd, nullptr);
-            close(client_fd);
-            return false;
+          uint32_t event_flags = events[i].events;
+
+          // if (events[i].events & EPOLLERR || events[i].events & EPOLLHUP || events[i].events & EPOLLRDHUP) {
+          //   std::clog << "Client disconnected or error. fd: " << client_fd
+          //             << ", event: " << get_event_flags(events[i].events) << std::endl;
+          //   epoll_ctl(epoll_fd_, EPOLL_CTL_DEL, client_fd, nullptr);
+          //   close(client_fd);
+          //   return false;
+          // }
+          if (event_flags & (EPOLLERR | EPOLLHUP | EPOLLRDHUP)) {
+            disconnectClient(client_fd);
+            continue;
           }
-          std::clog << "[EVENT]: read from client" << std::endl;
-          // クライアントソケットからの読み取り
-          char buf[1024];
-          int read_num = read(events[i].data.fd, buf, 1024);
-          std::clog << "read num: " << read_num << std::endl;
-          if (read_num < 0) {
-            std::clog << "[EVENT]: disconnect with error (negative read num)" << std::endl;
-            perror("read error");
-            disconnectClient(events[i].data.fd);
-          } else if (read_num == 0) {
-            std::clog << "[EVENT]: disconnect with FIN (read num is 0)" << std::endl;
-            disconnectClient(events[i].data.fd);
-          } else {
-            buf[read_num] = '\0';
-            std::cout << "read: [" << buf << "]" << std::endl;
+          // ✅ 書き込み可能イベント
+          if (event_flags & EPOLLOUT) {
+            handleClientWrite(client_fd);
+          }
+          if (event_flags & EPOLLIN) {
+            std::clog << "[EVENT]: read from client" << std::endl;
+            // クライアントソケットからの読み取りclient_buffers_[x]に追加
+            char buf[1024];
+            int read_num = read(events[i].data.fd, buf, 1024);
+            std::clog << "read num: " << read_num << std::endl;
+            if (read_num < 0) {
+              std::clog << "[EVENT]: disconnect with error (negative read num)" << std::endl;
+              perror("read error");
+              disconnectClient(events[i].data.fd);
+            } else if (read_num == 0) {
+              std::clog << "[EVENT]: disconnect with FIN (read num is 0)" << std::endl;
+              disconnectClient(events[i].data.fd);
+            } else {
+              // 時間計算量: O(N^2)
+              client_buffers_[client_fd].append(buf, read_num);
+              size_t pos;
+              while ((pos = client_buffers_[client_fd].find('\n')) != std::string::npos) {
+                std::string message = client_buffers_[client_fd].substr(0, pos);
+                if (!message.empty() && message[message.length() - 1] == '\r') {
+                  message.erase(message.length() - 1);
+                }
+                std::string reply = processMessage(client_fd, message);
+                if (!reply.empty()) {
+                  queueMessage(client_fd, reply);
+                }
+                client_buffers_[client_fd].erase(0, pos + 1);
+              }
+            }
           }
         }
       }
@@ -167,11 +192,61 @@ private:
     epoll_ctl(epoll_fd_, EPOLL_CTL_DEL, client_fd, NULL);
     // fdを閉じる(ソケットのオープンファイル?への参照を正しく減らしてリソース開放させるため)
     close(client_fd);
+    // bufferの削除
+    client_buffers_.erase(client_fd);
+    write_buffers_.erase(client_fd);
+  }
+
+  void handleClientWrite(int client_fd) {
+    if (write_buffers_[client_fd].empty()) {
+      return; // 送信バッファが空なら何もしない
+    }
+
+    const std::string& data_to_send = write_buffers_[client_fd];
+    int sent_bytes = write(client_fd, data_to_send.c_str(), data_to_send.length());
+
+    if (sent_bytes == -1) {
+      if (errno != EAGAIN && errno != EWOULDBLOCK) {
+        perror("write error");
+        disconnectClient(client_fd);
+      }
+      return;
+    }
+
+    write_buffers_[client_fd].erase(0, sent_bytes);
+
+    // バッファが空になったらEPOLLOUTの監視を解除
+    if (write_buffers_[client_fd].empty()) {
+      struct epoll_event ev;
+      ev.events = EPOLLIN | EPOLLET | EPOLLRDHUP; // OUTを外す
+      ev.data.fd = client_fd;
+      epoll_ctl(epoll_fd_, EPOLL_CTL_MOD, client_fd, &ev);
+    }
+  }
+
+  void queueMessage(int client_fd, const std::string& message) {
+    bool was_empty = write_buffers_[client_fd].empty();
+    write_buffers_[client_fd] += message;
+
+    // ✅ バッファが空の状態からデータが追加された場合のみ、EPOLLOUTを登録
+    if (was_empty) {
+      struct epoll_event ev;
+      ev.events = EPOLLIN | EPOLLET | EPOLLRDHUP | EPOLLOUT; // OUTを追加
+      ev.data.fd = client_fd;
+      epoll_ctl(epoll_fd_, EPOLL_CTL_MOD, client_fd, &ev);
+    }
+  }
+
+  std::string processMessage(int client_fd, std::string message) {
+    std::cout << "Message from fd(" << client_fd << "): [" << message << "]" << std::endl;
+    return message + "\n";
   }
 
   int listen_fd_;
   int epoll_fd_;
   struct epoll_event ev_;
+  std::map<int, std::string> client_buffers_;
+  std::map<int, std::string> write_buffers_;
 
   int port_;
 };
