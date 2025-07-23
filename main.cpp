@@ -170,8 +170,8 @@ private:
   void acceptNewClient() {
     // 新しい接続を受け付け
     sockaddr_in client_address;
-    int client_addr_len;
-    int conn_fd = accept(listen_fd_, (struct sockaddr *)&client_address, (socklen_t*)&client_addr_len);
+    socklen_t client_addr_len = sizeof(client_address);
+    int conn_fd = accept(listen_fd_, (struct sockaddr *)&client_address, &client_addr_len);
     if (conn_fd == -1) {
       perror("accept");
       // EAGAINやEWOULDBLOCKは致命的ではないが、この例では何もしない

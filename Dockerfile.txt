@@ -1,0 +1,20 @@
+FROM ubuntu:latest
+
+# 必要なパッケージのインストール
+RUN apt-get update && apt-get install -y \
+    build-essential \
+    g++ \
+    make \
+    gdb \
+    vim \
+    netcat-openbsd \
+    && rm -rf /var/lib/apt/lists/*
+
+# 作業ディレクトリの設定
+WORKDIR /ft_irc
+
+# ポート公開（IRCサーバーのデフォルトポート）
+EXPOSE 8080
+
+# デフォルトコマンド
+CMD ["/bin/bash"]

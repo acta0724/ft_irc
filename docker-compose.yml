@@ -1,0 +1,38 @@
+services:
+  # サーバー側コンテナ
+  irc_server:
+    image: ft_irc_linux
+    container_name: irc_server
+    build:
+      context: .
+      dockerfile: Dockerfile.txt
+    volumes:
+      - .:/ft_irc
+    ports:
+      - "8080:8080"
+    tty: true
+    stdin_open: true
+    networks:
+      - irc_network
+    command: /bin/bash
+
+  # クライアント側コンテナ
+  irc_client:
+    image: ft_irc_linux
+    container_name: irc_client
+    build:
+      context: .
+      dockerfile: Dockerfile.txt
+    volumes:
+      - .:/ft_irc
+    tty: true
+    stdin_open: true
+    networks:
+      - irc_network
+    command: /bin/bash
+    depends_on:
+      - irc_server
+
+networks:
+  irc_network:
+    driver: bridge
