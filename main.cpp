@@ -8,6 +8,17 @@
 #include <string>
 #include <cerrno>
 #include <map>
+#include <vector>
+#include <fcntl.h>
+#include <arpa/inet.h>
+#include <cstdlib>
+#include <ctime>
+#include <cctype>
+#include "Client.hpp"
+
+#define MAX_CONNECTIONS 100  // 最大接続数
+#define MAX_NICKNAME_LENGTH 9  // RFC 1459に基づくニックネームの最大長
+#define MAX_MESSAGE_LENGTH 512  // RFC 1459に基づくメッセージの最大長
 
 #ifndef nullptr
 # define nullptr (0)
@@ -35,9 +46,9 @@ std::string get_event_flags(uint32_t events) {
 
 class IrcServer {
 public:
-  IrcServer()
-    : port_(8080)
-  {
+  IrcServer(int port, const std::string& password)
+    : password_(password), port_(port) // Initialize in declaration order
+  { 
   }
   ~IrcServer()
   {
@@ -49,8 +60,7 @@ public:
       return false;
     }
 
-    // SO_REUSEADDR オプションを設定
-    int optval = 1; // オプションを有効にするための値
+    int optval = 1;
     if (setsockopt(listen_fd_, SOL_SOCKET, SO_REUSEADDR, &optval, sizeof(optval)) == -1) {
       perror("setsockopt");
       close(listen_fd_);
@@ -86,120 +96,115 @@ public:
       close(listen_fd_);
       close(epoll_fd_);
       return false;
-
     }
 
-    // イベントループ
     while (1) {
       struct epoll_event events[100];
       int n = epoll_wait(epoll_fd_, events, 100, -1);
       if (n == -1) {
+        if (errno == EINTR) continue;
         perror("epoll_wait");
-        // EINTR（シグナルによる中断）は無視して継続することが多い
-        if (errno == EINTR) {
-          continue;
-        }
-        break; // ループを抜ける
+        break;
       }
       for (int i = 0; i < n; ++i) {
-        std::clog
-          << "i: " << i << "\n"
-          << "event kind: " << get_event_flags(events[i].events) << "\n"
-          << "event fd: " << events[i].data.fd << "\n"
-          << std::flush;
         if (events[i].data.fd == listen_fd_) {
-          std::clog << "[EVENT]: connection with new client" << std::endl;
           acceptNewClient();
         } else {
           int client_fd = events[i].data.fd;
           uint32_t event_flags = events[i].events;
 
-          // if (events[i].events & EPOLLERR || events[i].events & EPOLLHUP || events[i].events & EPOLLRDHUP) {
-          //   std::clog << "Client disconnected or error. fd: " << client_fd
-          //             << ", event: " << get_event_flags(events[i].events) << std::endl;
-          //   epoll_ctl(epoll_fd_, EPOLL_CTL_DEL, client_fd, nullptr);
-          //   close(client_fd);
-          //   return false;
-          // }
           if (event_flags & (EPOLLERR | EPOLLHUP | EPOLLRDHUP)) {
             disconnectClient(client_fd);
             continue;
           }
-          // ✅ 書き込み可能イベント
           if (event_flags & EPOLLOUT) {
             handleClientWrite(client_fd);
           }
           if (event_flags & EPOLLIN) {
-            std::clog << "[EVENT]: read from client" << std::endl;
-            // クライアントソケットからの読み取りclient_buffers_[x]に追加
-            char buf[1024];
-            int read_num = read(events[i].data.fd, buf, 1024);
-            std::clog << "read num: " << read_num << std::endl;
-            if (read_num < 0) {
-              std::clog << "[EVENT]: disconnect with error (negative read num)" << std::endl;
-              perror("read error");
-              disconnectClient(events[i].data.fd);
-            } else if (read_num == 0) {
-              std::clog << "[EVENT]: disconnect with FIN (read num is 0)" << std::endl;
-              disconnectClient(events[i].data.fd);
-            } else {
-              // 時間計算量: O(N^2)
-              client_buffers_[client_fd].append(buf, read_num);
-              size_t pos;
-              while ((pos = client_buffers_[client_fd].find('\n')) != std::string::npos) {
-                std::string message = client_buffers_[client_fd].substr(0, pos);
-                if (!message.empty() && message[message.length() - 1] == '\r') {
-                  message.erase(message.length() - 1);
-                }
-                std::string reply = processMessage(client_fd, message);
-                if (!reply.empty()) {
-                  queueMessage(client_fd, reply);
-                }
-                client_buffers_[client_fd].erase(0, pos + 1);
-              }
-            }
+            handleClientRead(client_fd);
           }
         }
       }
-      std::clog << "----------------" << std::endl;
     }
     return false;
   }
 
 private:
   void acceptNewClient() {
-    // 新しい接続を受け付け
     sockaddr_in client_address;
     socklen_t client_addr_len = sizeof(client_address);
     int conn_fd = accept(listen_fd_, (struct sockaddr *)&client_address, &client_addr_len);
     if (conn_fd == -1) {
       perror("accept");
-      // EAGAINやEWOULDBLOCKは致命的ではないが、この例では何もしない
       return;
     }
-    // epollに登録
+    
+    int flags = fcntl(conn_fd, F_GETFL, 0);
+    fcntl(conn_fd, F_SETFL, flags | O_NONBLOCK);
+    
+    char client_ip[INET_ADDRSTRLEN];
+    inet_ntop(AF_INET, &client_address.sin_addr, client_ip, INET_ADDRSTRLEN);
+
+    Client client(conn_fd);
+    client.setHostname(std::string(client_ip));
+    clients_[conn_fd] = client;
+    
     struct epoll_event conn_ev;
-    conn_ev.events = EPOLLIN | EPOLLET;
+    conn_ev.events = EPOLLIN | EPOLLET | EPOLLRDHUP;
     conn_ev.data.fd = conn_fd;
     if (epoll_ctl(epoll_fd_, EPOLL_CTL_ADD, conn_fd, &conn_ev) == -1) {
       perror("epoll_ctl: conn_fd");
       close(conn_fd);
+      clients_.erase(conn_fd);
+    } else {
+      std::cout << "New client connected: fd=" << conn_fd << ", ip=" << client_ip << std::endl;
+    }
+  }
+
+  void handleClientRead(int client_fd) {
+    char buf[1024];
+    int read_num = read(client_fd, buf, 1024);
+    if (read_num < 0) {
+      if (errno != EAGAIN && errno != EWOULDBLOCK) {
+        perror("read error");
+        disconnectClient(client_fd);
+      }
+    } else if (read_num == 0) {
+      disconnectClient(client_fd);
+    } else {
+      client_buffers_[client_fd].append(buf, read_num);
+      size_t pos;
+      while ((pos = client_buffers_[client_fd].find('\n')) != std::string::npos) {
+        std::string message = client_buffers_[client_fd].substr(0, pos);
+        if (!message.empty() && message[message.length() - 1] == '\r') {
+          message.erase(message.length() - 1);
+        }
+        std::string reply = processMessage(client_fd, message);
+        if (!reply.empty()) {
+          queueMessage(client_fd, reply);
+        }
+        client_buffers_[client_fd].erase(0, pos + 1);
+      }
     }
   }
 
   void disconnectClient(int client_fd) {
-    // epollから削除
+    std::cout << "Client disconnected: fd=" << client_fd;
+    if (clients_.count(client_fd)) {
+      std::cout << ", nickname=" << clients_[client_fd].getNickname();
+    }
+    std::cout << std::endl;
+    
     epoll_ctl(epoll_fd_, EPOLL_CTL_DEL, client_fd, NULL);
-    // fdを閉じる(ソケットのオープンファイル?への参照を正しく減らしてリソース開放させるため)
     close(client_fd);
-    // bufferの削除
     client_buffers_.erase(client_fd);
     write_buffers_.erase(client_fd);
+    clients_.erase(client_fd);
   }
 
   void handleClientWrite(int client_fd) {
-    if (write_buffers_[client_fd].empty()) {
-      return; // 送信バッファが空なら何もしない
+    if (!write_buffers_.count(client_fd) || write_buffers_[client_fd].empty()) {
+      return;
     }
 
     const std::string& data_to_send = write_buffers_[client_fd];
@@ -215,31 +220,174 @@ private:
 
     write_buffers_[client_fd].erase(0, sent_bytes);
 
-    // バッファが空になったらEPOLLOUTの監視を解除
     if (write_buffers_[client_fd].empty()) {
       struct epoll_event ev;
-      ev.events = EPOLLIN | EPOLLET | EPOLLRDHUP; // OUTを外す
+      ev.events = EPOLLIN | EPOLLET | EPOLLRDHUP;
       ev.data.fd = client_fd;
       epoll_ctl(epoll_fd_, EPOLL_CTL_MOD, client_fd, &ev);
     }
   }
 
   void queueMessage(int client_fd, const std::string& message) {
-    bool was_empty = write_buffers_[client_fd].empty();
+    bool was_empty = true;
+    if (write_buffers_.count(client_fd)) {
+        was_empty = write_buffers_[client_fd].empty();
+    }
     write_buffers_[client_fd] += message;
 
-    // ✅ バッファが空の状態からデータが追加された場合のみ、EPOLLOUTを登録
     if (was_empty) {
       struct epoll_event ev;
-      ev.events = EPOLLIN | EPOLLET | EPOLLRDHUP | EPOLLOUT; // OUTを追加
+      ev.events = EPOLLIN | EPOLLET | EPOLLRDHUP | EPOLLOUT;
       ev.data.fd = client_fd;
       epoll_ctl(epoll_fd_, EPOLL_CTL_MOD, client_fd, &ev);
     }
   }
 
+  bool isValidNickname(const std::string& nickname) {
+    if (nickname.empty() || nickname.length() > MAX_NICKNAME_LENGTH)
+        return false;
+    if (!isalpha(nickname[0]) && std::string("[]\\`_^{|}").find(nickname[0]) == std::string::npos)
+        return false;
+    for (size_t i = 1; i < nickname.length(); ++i) {
+      if (!isalnum(nickname[i]) && std::string("-[]\\`_^{|}").find(nickname[i]) == std::string::npos)
+        return false;
+    }
+    return true;
+  }
+  
+  bool isNicknameInUse(const std::string& nickname) {
+    for (std::map<int, Client>::const_iterator it = clients_.begin(); it != clients_.end(); ++it) {
+      if (it->second.getNickname() == nickname) return true;
+    }
+    return false;
+  }
+  
+  std::string getServerName() const { return "irc.42.jp"; }
+  
+  std::string getCurrentTime() const {
+    time_t now = time(0);
+    char buf[80];
+    strftime(buf, sizeof(buf), "%Y-%m-%d %H:%M:%S %Z", localtime(&now));
+    return buf;
+  }
+  
   std::string processMessage(int client_fd, std::string message) {
-    std::cout << "Message from fd(" << client_fd << "): [" << message << "]" << std::endl;
-    return message + "\n";
+    if (message.length() > MAX_MESSAGE_LENGTH) {
+      return "ERROR :Message too long\r\n";
+    }
+    
+    Client& client = clients_.at(client_fd);
+    std::string client_id;
+    if (client.getNickname().empty()) {
+        std::stringstream ss;
+        ss << "fd(" << client_fd << ")";
+        client_id = ss.str();
+    } else {
+        client_id = client.getNickname();
+    }
+    std::cout << "Message from " << client_id << ": [" << message << "]" << std::endl;
+    
+    std::string command, params;
+    size_t space_pos = message.find(" ");
+    if (space_pos != std::string::npos) {
+      command = message.substr(0, space_pos);
+      params = message.substr(space_pos + 1);
+    } else {
+      command = message;
+    }
+    
+    std::string upper_command = command;
+    for (size_t i = 0; i < upper_command.length(); ++i) upper_command[i] = toupper(upper_command[i]);
+    
+    if (upper_command == "PASS") {
+      return handleCommandPass(client, params);
+    }
+
+    if (!client.isAuthenticated()) {
+      return ":" + getServerName() + " 451 " + (client.getNickname().empty() ? "*" : client.getNickname()) + " :You have not registered\r\n";
+    }
+
+    if (upper_command == "NICK") {
+      return handleCommandNick(client, params);
+    } else if (upper_command == "USER") {
+      return handleCommandUser(client, params);
+    }  else if (upper_command == "PING") {
+      return "PONG " + getServerName() + " :" + (params.empty() ? getServerName() : params) + "\r\n";
+    } else if (upper_command == "QUIT") {
+      return "";
+    } else {
+      if (!client.isRegistered()) {
+        return ":" + getServerName() + " 451 " + client.getNickname() + " :You have not registered\r\n";
+      }
+      return ":" + getServerName() + " 421 " + client.getNickname() + " " + upper_command + " :Unknown command\r\n";
+    }
+  }
+  
+  std::string sendWelcomeMessages(const Client& client) {
+    std::string result;
+    result += ":" + getServerName() + " 001 " + client.getNickname() + " :Welcome to the Internet Relay Network " + client.getNickname() + "!" + client.getUsername() + "@" + client.getHostname() + "\r\n";
+    result += ":" + getServerName() + " 002 " + client.getNickname() + " :Your host is " + getServerName() + ", running version 1.0\r\n";
+    result += ":" + getServerName() + " 003 " + client.getNickname() + " :This server was created " + getCurrentTime() + "\r\n";
+    result += ":" + getServerName() + " 004 " + client.getNickname() + " " + getServerName() + " 1.0 o o\r\n";
+    return result;
+  }
+
+  std::string handleCommandPass(Client& client, const std::string& params) {
+    if (client.isRegistered()) 
+      return ":" + getServerName() + " 462 " + client.getNickname() + " :You may not reregister\r\n";
+    if (params.empty())
+      return ":" + getServerName() + " 461 " + (client.getNickname().empty() ? "*" : client.getNickname()) + " PASS :Not enough parameters\r\n";
+    if (params == password_) {
+      client.setAuthenticated(true);
+      return "";
+    } else {
+      return ":" + getServerName() + " 464 " + (client.getNickname().empty() ? "*" : client.getNickname()) + " :Password incorrect\r\n";
+    }
+  }
+
+  std::string handleCommandNick(Client& client, const std::string& params) {
+    if (params.empty())
+      return ":" + getServerName() + " 431 " + (client.getNickname().empty() ? "*" : client.getNickname()) + " :No nickname given\r\n";
+    std::string new_nickname = params.substr(0, params.find(" "));
+    if (!isValidNickname(new_nickname))
+      return ":" + getServerName() + " 432 " + (client.getNickname().empty() ? "*" : client.getNickname()) + " " + new_nickname + " :Erroneous nickname\r\n";
+    if (isNicknameInUse(new_nickname))
+      return ":" + getServerName() + " 433 " + (client.getNickname().empty() ? "*" : client.getNickname()) + " " + new_nickname + " :Nickname is already in use\r\n";
+    
+    std::string old_nickname = client.getNickname();
+    client.setNickname(new_nickname);
+    if (!old_nickname.empty()) {
+      return ":" + old_nickname + "!" + client.getUsername() + "@" + client.getHostname() + " NICK :" + new_nickname + "\r\n";
+    }
+    // Check if the user can now be fully registered
+    if (!client.getUsername().empty() && !client.isRegistered()) {
+      client.setRegistered(true);
+      return sendWelcomeMessages(client);
+    }
+    return "";
+  }
+
+  std::string handleCommandUser(Client& client, const std::string& params) {
+    if (client.isRegistered())
+      return ":" + getServerName() + " 462 " + client.getNickname() + " :You may not reregister\r\n";
+    size_t pos = params.find(" :");
+    std::string realname = (pos == std::string::npos) ? "" : params.substr(pos + 2);
+    std::string user_params = (pos == std::string::npos) ? params : params.substr(0, pos);
+    std::vector<std::string> parts;
+    std::string part;
+    std::istringstream iss(user_params);
+    while (iss >> part) parts.push_back(part);
+    if (parts.size() < 3 || realname.empty())
+      return ":" + getServerName() + " 461 " + client.getNickname() + " USER :Not enough parameters\r\n";
+    
+    client.setUsername(parts[0]);
+    client.setRealname(realname);
+    
+    if (!client.getNickname().empty()) {
+      client.setRegistered(true);
+      return sendWelcomeMessages(client);
+    }
+    return "";
   }
 
   int listen_fd_;
@@ -247,11 +395,21 @@ private:
   struct epoll_event ev_;
   std::map<int, std::string> client_buffers_;
   std::map<int, std::string> write_buffers_;
-
-  int port_;
+  std::map<int, Client> clients_;
+  std::string password_; // Declaration order
+  int port_;             // must match initializer list order
 };
 
-int main(void) {
-  IrcServer server = IrcServer();
+int main(int argc, char* argv[]) {
+  if (argc != 3) {
+    std::cerr << "Usage: " << argv[0] << " <port> <password>" << std::endl;
+    return 1;
+  }
+
+  int port = atoi(argv[1]); // atoi is in the global namespace
+  std::string password = argv[2];
+
+  IrcServer server(port, password);
   server.activate();
+  return 0;
 }

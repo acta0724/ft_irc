@@ -7,10 +7,10 @@ CPPC = c++
 CPPFLAGS = -Wall -Wextra -Werror -std=c++98 -pedantic -MMD -MP
 
 NAME = ircserv
-SRCS = main.cpp
+SRCS = main.cpp Client.cpp
 OBJS = $(SRCS:.cpp=.o)
 DEPS = $(SRCS:.cpp=.d)
-HEADERS =
+HEADERS = Client.hpp
 
 DOCKER_COMPOSE = docker compose
 DOCKERFILE = Dockerfile.txt
@@ -69,9 +69,13 @@ docker-logs:
 docker-ps:
 	$(DOCKER_COMPOSE) ps
 
+.PHONY: docker-exec
+docker-exec:
+	$(DOCKER_COMPOSE) exec -it irc_server bash
+
 .PHONY: docker-server
 docker-server: all
-	$(DOCKER_COMPOSE) exec irc_server bash -c "cd /ft_irc && ./$(NAME)"
+	$(DOCKER_COMPOSE) exec irc_server bash -c "cd /ft_irc && ./$(NAME) 8080 irc_server"
 
 .PHONY: docker-client
 docker-client:
