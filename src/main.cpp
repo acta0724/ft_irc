@@ -8,6 +8,7 @@
 #include <string>
 #include <cerrno>
 #include <map>
+#include <cstdlib>
 
 #ifndef nullptr
 # define nullptr (0)
@@ -35,8 +36,9 @@ std::string get_event_flags(uint32_t events) {
 
 class IrcServer {
 public:
-  IrcServer()
-    : port_(8080)
+  IrcServer(int port, const std::string& password)
+    : port_(port),
+      password_(password)
   {
   }
   ~IrcServer()
@@ -249,9 +251,24 @@ private:
   std::map<int, std::string> write_buffers_;
 
   int port_;
+  std::string password_;
 };
 
-int main(void) {
-  IrcServer server = IrcServer();
+int main(int argc, char **argv) {
+  if (argc != 3) {
+    std::cerr << "Usage: " << argv[0] << " <port> <password>" << std::endl;
+    return 1;
+  }
+
+  int port = std::atoi(argv[1]);
+  std::string password = argv[2];
+
+  if (port <= 0 || port > 65535) {
+    std::cerr << "Error: Invalid port number. Port must be between 1 and 65535." << std::endl;
+    return 1;
+  }
+
+  IrcServer server = IrcServer(port, password);
   server.activate();
+  return 0;
 }
