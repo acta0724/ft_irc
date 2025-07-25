@@ -71,5 +71,6 @@
     "typeinfo": "cpp",
     "semaphore": "cpp",
     "map": "cpp"
-  }
+  },
+  "C_Cpp.default.compilerPath": "\\\\wsl.localhost\\Ubuntu\\usr\\bin\\x86_64-linux-gnu-g++-13"
 }

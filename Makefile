@@ -11,31 +11,37 @@ SRC_DIR = src
 SRCS = src/main.cpp
 OBJ_DIR = obj
 OBJS = $(patsubst src/%.cpp, $(OBJ_DIR)/%.o, $(SRCS))
-DEP_DIR = dep
-DEPS = $(patsubst src/%.cpp, $(DEP_DIR)/%.d, $(SRCS))
+DEPS = $(patsubst src/%.cpp, $(OBJ_DIR)/%.d, $(SRCS))
 HEADERS =
 
 .PHONY: all
-all: $(NAME)
+all: $(NAME) ## 実行ファイルの作成
 
 .PHONY: clean
-clean:
+clean: ## 中間ファイルのクリーンアップ
 	$(RM) $(OBJ_DIR)
-	$(RM) $(DEP_DIR)
 
 .PHONY: fclean
-fclean:
+fclean: ## 完全なクリーンアップ
 	$(MAKE) clean
 	$(RM) $(NAME)
 
 .PHONY: re
-re:
+re: ## 再コンパイル
 	$(MAKE) fclean
 	$(MAKE) all
 
 .PHONY: run
-run: $(NAME)
-	./$(NAME)
+run: $(NAME) ## プログラムの実行
+	./$(NAME) 8080 "pass"
+
+.PHONY: test
+test: $(NAME) ## テストの実行
+	python3 test/test_irc_server.py
+
+.PHONY: help
+help: ## ヘルプ
+	@grep -E '^[a-zA-Z_-]+:.*?## .*$$' Makefile | awk 'BEGIN {FS = ":.*?## "}; {printf "\033[36m%-30s\033[0m %s\n", $$1, $$2}'
 
 $(NAME): $(OBJS)
 	$(CPPC) $(CPPFLAGS) -o $@ $(OBJS)
@@ -45,3 +51,4 @@ $(OBJ_DIR)/%.o: $(SRC_DIR)/%.cpp
 	$(CPPC) $(CPPFLAGS) -c -o $@ $<
 
 -include $(DEPS)
+

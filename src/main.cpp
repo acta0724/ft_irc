@@ -37,8 +37,8 @@ std::string get_event_flags(uint32_t events) {
 class IrcServer {
 public:
   IrcServer(int port, const std::string& password)
-    : port_(port),
-      password_(password)
+    : port_(port)
+    , password_(password)
   {
   }
   ~IrcServer()
