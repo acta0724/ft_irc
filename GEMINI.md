@@ -8,6 +8,6 @@
 ## ロール
 
 - Programmer
-  - GEMINI_PROGRAMER.md に強く従うこと。
+  - GEMINI_PROGRAMMER.md に強く従うこと。
 - Tester
   - GEMINI_TESTER.md に強く従うこと。
