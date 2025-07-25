@@ -9,6 +9,7 @@
 #include <cerrno>
 #include <map>
 #include <cstdlib>
+#include <fcntl.h>
 
 #ifndef nullptr
 # define nullptr (0)
@@ -50,7 +51,12 @@ public:
       perror("socket");
       return false;
     }
-
+    if (fcntl(listen_fd_, F_SETFL, O_NONBLOCK) == -1) {
+      perror("fcntl");
+      close(listen_fd_);
+      return false;
+    }
+    
     // SO_REUSEADDR オプションを設定
     int optval = 1; // オプションを有効にするための値
     if (setsockopt(listen_fd_, SOL_SOCKET, SO_REUSEADDR, &optval, sizeof(optval)) == -1) {
@@ -177,6 +183,12 @@ private:
     if (conn_fd == -1) {
       perror("accept");
       // EAGAINやEWOULDBLOCKは致命的ではないが、この例では何もしない
+      return;
+    }
+    // 新しく受け付けたソケットを非ブロッキングに設定
+    if (fcntl(conn_fd, F_SETFL, O_NONBLOCK) == -1) {
+      perror("fcntl conn_fd");
+      close(conn_fd);
       return;
     }
     // epollに登録

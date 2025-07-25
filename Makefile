@@ -4,11 +4,11 @@ RM = rm -rf
 CP = cp -r
 
 CPPC = c++
-CPPFLAGS = -Wall -Wextra -Werror -std=c++98 -pedantic -MMD -MP
+CPPFLAGS = -Wall -Wextra -Werror -std=c++98 -pedantic -MMD -MP -Iinc
 
 NAME = ircserv
 SRC_DIR = src
-SRCS = src/main.cpp
+SRCS = src/main.cpp src/Client.cpp
 OBJ_DIR = obj
 OBJS = $(patsubst src/%.cpp, $(OBJ_DIR)/%.o, $(SRCS))
 DEPS = $(patsubst src/%.cpp, $(OBJ_DIR)/%.d, $(SRCS))
