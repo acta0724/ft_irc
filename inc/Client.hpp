@@ -13,6 +13,7 @@ private:
     std::string _username;
 
 public:
+    Client(); // デフォルトコンストラクタを追加
     Client(int fd);
     ~Client();
 

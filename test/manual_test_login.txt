@@ -1,0 +1,3 @@
+PASS pass
+NICK yayo
+USER yojiyama7 0 * :yoji yama

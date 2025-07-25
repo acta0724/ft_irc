@@ -1,5 +1,7 @@
 #include "Client.hpp"
 
+Client::Client() : _fd(-1), _authenticated(false), _nickname(""), _username("") {}
+
 Client::Client(int fd) : _fd(fd), _authenticated(false) {}
 
 Client::~Client() {}
