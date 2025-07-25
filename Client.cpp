@@ -2,8 +2,17 @@
 #include <algorithm>
 
 Client::Client(int fd)
-    : fd_(fd), registered_(false), authenticated_(false)
 {
+    fd_ = fd;
+    registered_ = false;
+    authenticated_ = false;
+}
+
+Client::Client()
+{
+    fd_ = -1;
+    registered_ = false;
+    authenticated_ = false;
 }
 
 Client::~Client()

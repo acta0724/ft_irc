@@ -145,8 +145,8 @@ private:
     char client_ip[INET_ADDRSTRLEN];
     inet_ntop(AF_INET, &client_address.sin_addr, client_ip, INET_ADDRSTRLEN);
 
-    Client client(conn_fd);
-    client.setHostname(std::string(client_ip));
+    Client* client = new Client(conn_fd);
+    client->setHostname(std::string(client_ip));
     clients_[conn_fd] = client;
     
     struct epoll_event conn_ev;
@@ -155,6 +155,7 @@ private:
     if (epoll_ctl(epoll_fd_, EPOLL_CTL_ADD, conn_fd, &conn_ev) == -1) {
       perror("epoll_ctl: conn_fd");
       close(conn_fd);
+      delete client;
       clients_.erase(conn_fd);
     } else {
       std::cout << "New client connected: fd=" << conn_fd << ", ip=" << client_ip << std::endl;
@@ -190,16 +191,18 @@ private:
 
   void disconnectClient(int client_fd) {
     std::cout << "Client disconnected: fd=" << client_fd;
-    if (clients_.count(client_fd)) {
-      std::cout << ", nickname=" << clients_[client_fd].getNickname();
+    std::map<int, Client*>::iterator it = clients_.find(client_fd);
+    if (it != clients_.end()) {
+      std::cout << ", nickname=" << it->second->getNickname();
+      delete it->second; // 動的に確保したメモリを解放
+      clients_.erase(it);
     }
     std::cout << std::endl;
     
     epoll_ctl(epoll_fd_, EPOLL_CTL_DEL, client_fd, NULL);
     close(client_fd);
-    client_buffers_.erase(client_fd);
     write_buffers_.erase(client_fd);
-    clients_.erase(client_fd);
+    client_buffers_.erase(client_fd);
   }
 
   void handleClientWrite(int client_fd) {
@@ -256,8 +259,8 @@ private:
   }
   
   bool isNicknameInUse(const std::string& nickname) {
-    for (std::map<int, Client>::const_iterator it = clients_.begin(); it != clients_.end(); ++it) {
-      if (it->second.getNickname() == nickname) return true;
+    for (std::map<int, Client*>::const_iterator it = clients_.begin(); it != clients_.end(); ++it) {
+      if (it->second->getNickname() == nickname) return true;
     }
     return false;
   }
@@ -276,7 +279,7 @@ private:
       return "ERROR :Message too long\r\n";
     }
     
-    Client& client = clients_.at(client_fd);
+    Client& client = *clients_.at(client_fd);
     std::string client_id;
     if (client.getNickname().empty()) {
         std::stringstream ss;
@@ -333,7 +336,7 @@ private:
   }
 
   std::string handleCommandPass(Client& client, const std::string& params) {
-    if (client.isRegistered()) 
+    if (client.isRegistered())
       return ":" + getServerName() + " 462 " + client.getNickname() + " :You may not reregister\r\n";
     if (params.empty())
       return ":" + getServerName() + " 461 " + (client.getNickname().empty() ? "*" : client.getNickname()) + " PASS :Not enough parameters\r\n";
@@ -395,7 +398,7 @@ private:
   struct epoll_event ev_;
   std::map<int, std::string> client_buffers_;
   std::map<int, std::string> write_buffers_;
-  std::map<int, Client> clients_;
+  std::map<int, Client*> clients_;
   std::string password_; // Declaration order
   int port_;             // must match initializer list order
 };

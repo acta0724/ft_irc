@@ -6,7 +6,8 @@
 
 class Client {
 public:
-    Client(int fd = -1);
+    Client();
+    Client(int fd);
     ~Client();
 
     // ゲッター
@@ -34,6 +35,9 @@ public:
     bool isInChannel(const std::string& channel) const;
 
 private:
+    Client(const Client& other);
+    Client& operator=(const Client& other);
+
     int fd_;                        // クライアントのソケットディスクリプタ
     std::string nickname_;          // ニックネーム
     std::string username_;          // ユーザー名
