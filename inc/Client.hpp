@@ -8,7 +8,7 @@ class Client
 {
 private:
     int         _fd;
-    bool        _authenticated;
+    int        _auth_level;
     std::string _nickname;
     std::string _username;
 
@@ -18,11 +18,11 @@ public:
     ~Client();
 
     int         getFd() const;
-    bool        isAuthenticated() const;
+    int         getAuthLevel() const;
     std::string getNickname() const;
     std::string getUsername() const;
 
-    void setAuthenticated(bool auth);
+    void setAuthLevel(int auth);
     void setNickname(const std::string& nickname);
     void setUsername(const std::string& username);
 };

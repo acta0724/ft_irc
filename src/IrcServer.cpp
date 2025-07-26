@@ -248,19 +248,25 @@ std::string IrcServer::processMessage(int client_fd, std::string message) {
 
   Command cmd = parseCommand(message);
 
-  if (cmd.command == "PASS") {
-    handlePassCommand(client_fd, cmd);
-  } else if (cmd.command == "NICK") {
-    handleNickCommand(client_fd, cmd);
-  } else if (cmd.command == "USER") {
-    handleUserCommand(client_fd, cmd);
-  } else if (cmd.command == "CAP") {
+  if (cmd.command == "CAP") {
     if (cmd.parameters.size() >= 1 && cmd.parameters[0] == "LS") {
       sendMessage(client_fd, ":" + SERVER_NAME + " CAP * LS :\r\n"); // No capabilities for now
       sendMessage(client_fd, ":" + SERVER_NAME + " CAP * END\r\n");
     } else {
       sendMessage(client_fd, ":" + SERVER_NAME + " 421 CAP :Unknown CAP subcommand\r\n");
     }
+  } else if (cmd.command == "PASS") {
+    handlePassCommand(client_fd, cmd);
+  } else if (clients_[client_fd].getAuthLevel() < 1) {
+    sendMessage(client_fd, ":" + SERVER_NAME + " 451 :You have not registered\r\n");
+  } else if (cmd.command == "NICK") {
+    handleNickCommand(client_fd, cmd);
+  } else if (clients_[client_fd].getAuthLevel() < 2) {
+    // pass
+  } else if (cmd.command == "USER") {
+    handleUserCommand(client_fd, cmd);
+  } else if (clients_[client_fd].getAuthLevel() < 3) {
+    // pass
   } else {
     sendMessage(client_fd, ":" + SERVER_NAME + " 421 " + cmd.command + " :Unknown command\r\n");
   }
@@ -316,15 +322,16 @@ void IrcServer::handlePassCommand(int client_fd, const Command& cmd) {
     sendMessage(client_fd, ":" + SERVER_NAME + " 461 PASS :Not enough parameters\r\n");
     return;
   }
-  if (clients_[client_fd].isAuthenticated()) {
+  if (clients_[client_fd].getAuthLevel() >= 1) {
     sendMessage(client_fd, ":" + SERVER_NAME + " 462 :You may not reregister\r\n");
     return;
   }
   if (cmd.parameters[0] == password_) {
-    clients_[client_fd].setAuthenticated(true);
-    sendMessage(client_fd, ":" + SERVER_NAME + " NOTICE AUTH :*** Password accepted - you are now recognized.\r\n");
+    clients_[client_fd].setAuthLevel(1);
+    // sendMessage(client_fd, ":" + SERVER_NAME + " NOTICE AUTH :*** Password accepted - you are now recognized.\r\n");
   } else {
-    sendMessage(client_fd, ":" + SERVER_NAME + " 464 :Password incorrect\r\n");
+    std::string client_name = clients_[client_fd].getNickname().empty() ? "*" : clients_[client_fd].getNickname();
+    sendMessage(client_fd, ":" + SERVER_NAME + " 464 " + client_name + " :Password incorrect\r\n");
     return;
   }
 }
@@ -334,12 +341,12 @@ void IrcServer::handleNickCommand(int client_fd, const Command& cmd) {
     sendMessage(client_fd, ":" + SERVER_NAME + " 431 :No nickname given\r\n");
     return;
   }
+  // XXX: わざわざ合成してからvalidationをしている
   std::string nickname = cmd.parameters[0];
   // Reconstruct the full nickname in case parseCommand split it
   for (size_t i = 1; i < cmd.parameters.size(); ++i) {
     nickname += " " + cmd.parameters[i];
   }
-
   if (!isValidNickname(nickname)) {
     sendMessage(client_fd, ":" + SERVER_NAME + " 432 " + nickname + " :Erroneous nickname\r\n");
     return;
@@ -347,14 +354,19 @@ void IrcServer::handleNickCommand(int client_fd, const Command& cmd) {
 
   for (std::map<int, Client>::iterator it = clients_.begin(); it != clients_.end(); ++it) {
     std::clog << "[DEBUG] Existing client FD: " << it->first << ", Nickname: [" << it->second.getNickname() << "]" << std::endl;
-    if (it->first != client_fd && toLower(it->second.getNickname()) == toLower(nickname)) {
+    if (it->first != client_fd && it->second.getNickname() == nickname) {
       std::clog << "433 pattern" << std::endl;
-      sendMessage(client_fd, ":" + SERVER_NAME + " 433 " + nickname + " :Nickname is already in use\r\n");
+      sendMessage(client_fd, ":" + SERVER_NAME + " 433 * :Nickname is already in use\r\n");
       return;
     }
   }
+  // 既存のニックネームがある場合、変更メッセージを送信
+  if (!clients_[client_fd].getNickname().empty()) {
+    sendMessage(client_fd, ":" + clients_[client_fd].getNickname() + " NICK :" + nickname + "\r\n");
+  }
   clients_[client_fd].setNickname(nickname);
-  sendMessage(client_fd, ":" + SERVER_NAME + " NOTICE AUTH :*** Nickname set to " + nickname + ".\r\n");
+  clients_[client_fd].setAuthLevel(2);
+  // sendMessage(client_fd, ":" + SERVER_NAME + " NOTICE AUTH :*** Nickname set to " + nickname + ".\r\n");
 }
 
 bool IrcServer::isValidNickname(const std::string& nickname) {
@@ -397,9 +409,9 @@ void IrcServer::handleUserCommand(int client_fd, const Command& cmd) {
     return;
   }
   clients_[client_fd].setUsername(cmd.parameters[0]);
+  clients_[client_fd].setAuthLevel(3);
   std::string realname = cmd.parameters[3];
-  // 
-  sendMessage(client_fd, ":" + SERVER_NAME + " NOTICE AUTH :*** Username and realname set.\r\n");
+  // sendMessage(client_fd, ":" + SERVER_NAME + " NOTICE AUTH :*** Username and realname set.\r\n");
   sendMessage(client_fd, ":" + SERVER_NAME + " 001 " + clients_.at(client_fd).getNickname() + " :Welcome to the ft_irc Network, " + clients_.at(client_fd).getNickname() + "!\r\n");
 }
 

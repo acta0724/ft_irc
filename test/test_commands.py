@@ -95,16 +95,14 @@ def run_test():
         client_socket_fail_pass.settimeout(5)
 
         send_command(client_socket_fail_pass, "PASS wrongpass")
-        send_command(client_socket_fail_pass, "NICK failuser")
-        send_command(client_socket_fail_pass, "USER failuser 0 * :Fail User")
         response_fail_pass = recv_response(client_socket_fail_pass)
-
-        if "464 failuser :Password incorrect" not in response_fail_pass:
+        if "464 * :Password incorrect" not in response_fail_pass:
             print("FAIL: 誤ったパスワードでPASSコマンドを送信した後、サーバーはERR_PASSWDMISMATCH (464) を返すべきです。")
             print("これは、サーバーがパスワードを正しく検証していないか、登録プロセス中に適切なエラーを返していないためかもしれません。")
             print(f"  現在のサーバー応答: {response_fail_pass}")
             return False
         print("SUCCESS: PASS command with incorrect password tested successfully.")
+
         client_socket_fail_pass.close()
 
         # Test CAP LS command
@@ -166,7 +164,7 @@ def run_test():
         response2 = recv_response(client_socket2)
 
         # Expect ERR_NICKNAMEINUSE (433) for the second client
-        if "433 testuser :Nickname is already in use" not in response2:
+        if "433 * :Nickname is already in use" not in response2:
             print("FAIL: 既にネットワーク上で使用されているニックネームを別のクライアントが登録しようとした場合、サーバーはこれを拒否する必要があります。")
             print("この状況では、サーバーは ERR_NICKNAMEINUSE (433) を返すべきです。")
             print("このテストは、サーバーがニックネームの重複を検出し、適切なエラーコードで新しい登録を阻止することを確認します。")

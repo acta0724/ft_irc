@@ -1,8 +1,8 @@
 #include "Client.hpp"
 
-Client::Client() : _fd(-1), _authenticated(false), _nickname(""), _username("") {}
+Client::Client() : _fd(-1), _auth_level(0), _nickname(""), _username("") {}
 
-Client::Client(int fd) : _fd(fd), _authenticated(false) {}
+Client::Client(int fd) : _fd(fd), _auth_level(0) {}
 
 Client::~Client() {}
 
@@ -10,8 +10,8 @@ int Client::getFd() const {
     return _fd;
 }
 
-bool Client::isAuthenticated() const {
-    return _authenticated;
+int Client::getAuthLevel() const {
+  return _auth_level;
 }
 
 std::string Client::getNickname() const {
@@ -22,8 +22,8 @@ std::string Client::getUsername() const {
     return _username;
 }
 
-void Client::setAuthenticated(bool auth) {
-    _authenticated = auth;
+void Client::setAuthLevel(int auth) {
+    _auth_level = auth;
 }
 
 void Client::setNickname(const std::string& nickname) {
