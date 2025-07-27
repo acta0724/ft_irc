@@ -13,6 +13,7 @@
 #include <arpa/inet.h>
 #include <cstdlib>
 #include <ctime>
+#include <cstring> // For memset
 #include <cctype>
 #include "Client.hpp"
 
@@ -68,6 +69,7 @@ public:
     }
 
     sockaddr_in server_address;
+    memset(&server_address, 0, sizeof(server_address)); // It's good practice to zero out the struct.
     server_address.sin_family = AF_INET;
     server_address.sin_port = htons(port_);
     server_address.sin_addr.s_addr = INADDR_ANY;
@@ -247,25 +249,36 @@ private:
   }
 
   bool isValidNickname(const std::string& nickname) {
-    if (nickname.empty() || nickname.length() > MAX_NICKNAME_LENGTH)
+    if (nickname.empty() || nickname.length() > MAX_NICKNAME_LENGTH) {
         return false;
-    if (!isalpha(nickname[0]) && std::string("[]\\`_^{|}").find(nickname[0]) == std::string::npos)
+    }
+
+    static const std::string special_chars_first = "[]\\`_^{|}";
+    static const std::string allowed_middle_chars = "-[]\\`_^{|}";
+
+    if (!isalpha(nickname[0]) && special_chars_first.find(nickname[0]) == std::string::npos) {
         return false;
+    }
+
     for (size_t i = 1; i < nickname.length(); ++i) {
-      if (!isalnum(nickname[i]) && std::string("-[]\\`_^{|}").find(nickname[i]) == std::string::npos)
+      if (!isalnum(nickname[i]) && allowed_middle_chars.find(nickname[i]) == std::string::npos) {
         return false;
+      }
     }
     return true;
   }
   
   bool isNicknameInUse(const std::string& nickname) {
     for (std::map<int, Client*>::const_iterator it = clients_.begin(); it != clients_.end(); ++it) {
-      if (it->second->getNickname() == nickname) return true;
+      if (it->second->getNickname() == nickname) 
+        return true;
     }
     return false;
   }
   
-  std::string getServerName() const { return "irc.42.jp"; }
+  std::string getServerName() const { 
+    return "irc.42.jp"; 
+  }
   
   std::string getCurrentTime() const {
     time_t now = time(0);
@@ -278,8 +291,12 @@ private:
     if (message.length() > MAX_MESSAGE_LENGTH) {
       return "ERROR :Message too long\r\n";
     }
-    
-    Client& client = *clients_.at(client_fd);
+    std::map<int, Client*>::iterator it = clients_.find(client_fd);
+    if (it == clients_.end()) {
+        std::cerr << "Error: processMessage called for a non-existent client_fd: " << client_fd << std::endl;
+        return "";
+    }
+    Client& client = *it->second;
     std::string client_id;
     if (client.getNickname().empty()) {
         std::stringstream ss;
@@ -290,6 +307,19 @@ private:
     }
     std::cout << "Message from " << client_id << ": [" << message << "]" << std::endl;
     
+    std::string prefix;
+    // A message can optionally start with a prefix.
+    if (message[0] == ':') {
+        size_t space_pos = message.find(" ");
+        if (space_pos != std::string::npos) {
+            prefix = message.substr(1, space_pos - 1);
+            message = message.substr(space_pos + 1);
+        } else {
+            // A message with only a prefix is invalid.
+            return ""; // Silently ignore.
+        }
+    }
+
     std::string command, params;
     size_t space_pos = message.find(" ");
     if (space_pos != std::string::npos) {
@@ -300,16 +330,15 @@ private:
     }
     
     std::string upper_command = command;
-    for (size_t i = 0; i < upper_command.length(); ++i) upper_command[i] = toupper(upper_command[i]);
-    
+    for (size_t i = 0; i < upper_command.length(); ++i) {
+        upper_command[i] = toupper(upper_command[i]);
+    }
     if (upper_command == "PASS") {
       return handleCommandPass(client, params);
     }
-
     if (!client.isAuthenticated()) {
       return ":" + getServerName() + " 451 " + (client.getNickname().empty() ? "*" : client.getNickname()) + " :You have not registered\r\n";
     }
-
     if (upper_command == "NICK") {
       return handleCommandNick(client, params);
     } else if (upper_command == "USER") {
