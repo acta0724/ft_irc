@@ -1,4 +1,4 @@
-MAKE := MAKE $(MAKEFLAGS)
+MAKE := make -$(MAKEFLAGS)
 MAKEFLAGS += -rR
 RM = rm -rf
 CP = cp -r
