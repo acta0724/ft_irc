@@ -16,7 +16,9 @@ public:
 
     // --- 基本情報 ---
     const std::string& getName() const;
+    const std::string& getKey() const;
     const std::string& getTopic() const;
+    void setKey(const std::string& key);
     void setTopic(const std::string& topic);
 
     // --- クライアント管理 ---
@@ -41,6 +43,7 @@ private:
     Channel& operator=(const Channel& other);
 
     std::string name_;
+    std::string key_;
     std::string topic_;
     std::map<int, Client*> clients_;      // <fd, Client*>
     std::vector<int> operators_;          // オペレータのfdリスト

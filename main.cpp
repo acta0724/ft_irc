@@ -17,6 +17,7 @@
 #include <cctype>
 #include "Client.hpp"
 #include "Channel.hpp"
+#include "utils.hpp"
 
 #define MAX_CONNECTIONS 100  // 最大接続数
 #define MAX_NICKNAME_LENGTH 9  // RFC 1459に基づくニックネームの最大長
@@ -346,6 +347,9 @@ private:
       return handleCommandUser(client, params);
     }  else if (upper_command == "PING") {
       return "PONG " + getServerName() + " :" + (params.empty() ? getServerName() : params) + "\r\n";
+    } else if (upper_command == "JOIN") {
+      handleCommandJoin(client, params);
+      return "";
     } else if (upper_command == "QUIT") {
       return "";
     } else {
@@ -418,14 +422,66 @@ private:
     
     if (!client.getNickname().empty()) {
       client.setRegistered(true);
-      return sendWelcomeMessages(client);
-    }
-    return "";
+	return sendWelcomeMessages(client);
+	}
+	return "";
+}
+
+void handleCommandJoin(Client& client, const std::string& params) {
+	std::string client_res_msg;
+
+	size_t pos = params.find(' ');
+	std::string left;
+	std::string right;
+	if (pos != std::string::npos)
+	{
+		left = params.substr(0, pos);
+		right = params.substr(pos + 1);
+	}
+	else
+	{
+		left = params;
+		right = "";
+	}
+
+	std::vector<std::string> ch_names = str_split_to_vector(left, ',');
+	std::vector<std::string> ch_keys = str_split_to_vector(right, ',');
+	
+	std::vector<std::string>::iterator name_it = ch_names.begin();
+	std::vector<std::string>::iterator name_ite = ch_names.end();
+	std::vector<std::string>::iterator key_it = ch_keys.begin();
+	std::vector<std::string>::iterator key_ite = ch_keys.end();
+	while (name_it != name_ite)
+	{
+		std::map<std::string, Channel*>::iterator channel_it = channels_.find(*name_it);
+		if (channel_it == channels_.end())
+		{
+			Channel *channel = channel_it->second;
+			try
+			{
+				channels_.insert(std::make_pair(*name_it, new Channel(*name_it)));
+			}
+			catch(const std::exception& e)
+			{
+				client_res_msg.append(":" + getServerName() + " 403 " + client.getNickname() + " " + *name_it + " :No such channel\r\n");
+				std::cerr << e.what() << '\n';
+			}
+			
+			std::string key = channels_[*name_it]->getKey();
+			bool key_correct = false;
+			if (key.empty() || (key_it != key_ite && key == *key_it))
+				key_correct = true;
+			if (key_correct)
+			{
+				client.joinChannel();
+			}
+		}
+		name_it++;
+		if (key_it != key_ite)
+			key_it++;
+	}
+
   }
-
-  // std::string handleCommandJoin(Client& client, std::string params) {
-
-  // }
 
   int listen_fd_;
   int epoll_fd_;

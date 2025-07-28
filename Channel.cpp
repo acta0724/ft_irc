@@ -2,7 +2,7 @@
 #include "Client.hpp" // Clientのメソッドを使うためインクルード
 #include <algorithm>
 
-Channel::Channel(const std::string& name) : name_(name)
+Channel::Channel(const std::string& name) : name_(name), key_("")
 {
     if (name.empty())
         throw std::invalid_argument("Channel name is empty");
@@ -37,8 +37,16 @@ const std::string& Channel::getName() const {
     return name_;
 }
 
+const std::string& Channel::getKey() const {
+    return key_;
+}
+
 const std::string& Channel::getTopic() const {
     return topic_;
+}
+
+void Channel::setKey(const std::string& key) {
+    key_ = key;
 }
 
 void Channel::setTopic(const std::string& topic) {

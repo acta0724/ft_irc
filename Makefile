@@ -7,7 +7,7 @@ CPPC = c++
 CPPFLAGS = -Wall -Wextra -Werror -std=c++98 -pedantic -MMD -MP
 
 NAME = ircserv
-SRCS = main.cpp Client.cpp
+SRCS = main.cpp utils.cpp Client.cpp
 OBJS = $(SRCS:.cpp=.o)
 DEPS = $(SRCS:.cpp=.d)
 HEADERS = Client.hpp
