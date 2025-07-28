@@ -2,7 +2,34 @@
 #include "Client.hpp" // Clientのメソッドを使うためインクルード
 #include <algorithm>
 
-Channel::Channel(const std::string& name) : name_(name) {}
+Channel::Channel(const std::string& name) : name_(name)
+{
+    if (name.empty())
+        throw std::invalid_argument("Channel name is empty");
+
+    char first_char = name[0];
+    if (!(first_char == '&'
+        || first_char == '#'
+        || first_char == '+'
+        || first_char == '!'))
+        throw std::invalid_argument("Channel name begin with invalid character: " + name);
+    
+    if (name.size() > 50)
+        throw std::invalid_argument("Channel name is too long (up to 50): " + name);
+    
+    std::string::const_iterator it = name.begin();
+    std::string::const_iterator ite = name.end();
+    while (it != ite)
+    {
+        char c = *it;
+        if (c == ' '
+            || c == static_cast<char>(7) //control G (^G or ASCII 7)
+            || c == ','
+            || c == ':')
+            throw std::invalid_argument("Channel name contains invalid character: " + name);
+        it++;
+    }
+}
 
 Channel::~Channel() {}
 

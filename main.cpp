@@ -16,6 +16,7 @@
 #include <cstring> // For memset
 #include <cctype>
 #include "Client.hpp"
+#include "Channel.hpp"
 
 #define MAX_CONNECTIONS 100  // 最大接続数
 #define MAX_NICKNAME_LENGTH 9  // RFC 1459に基づくニックネームの最大長
@@ -422,6 +423,10 @@ private:
     return "";
   }
 
+  // std::string handleCommandJoin(Client& client, std::string params) {
+
+  // }
+
   int listen_fd_;
   int epoll_fd_;
   struct epoll_event ev_;
@@ -430,6 +435,8 @@ private:
   std::map<int, Client*> clients_;
   std::string password_; // Declaration order
   int port_;             // must match initializer list order
+
+  std::map<std::string, Channel*> channels_; //<ChannelName, ChannelClass*>
 };
 
 int main(int argc, char* argv[]) {
