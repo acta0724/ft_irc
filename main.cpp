@@ -427,7 +427,19 @@ private:
 	return "";
 }
 
+void queueMessageEverybodyInChannel(const Channel& channel, const std::string msg)
+{
+  std::map<int, Client *>::const_iterator it = channel.getClients().begin();
+  std::map<int, Client *>::const_iterator ite = channel.getClients().end();
+  while (it != ite)
+  {
+    queueMessage(it->second->getFd(), msg);
+    it++;
+  }
+}
+
 void handleCommandJoin(Client& client, const std::string& params) {
+  //parse
 	std::string client_res_msg;
 
 	size_t pos = params.find(' ');
@@ -446,6 +458,7 @@ void handleCommandJoin(Client& client, const std::string& params) {
 
 	std::vector<std::string> ch_names = str_split_to_vector(left, ',');
 	std::vector<std::string> ch_keys = str_split_to_vector(right, ',');
+  //
 	
 	std::vector<std::string>::iterator name_it = ch_names.begin();
 	std::vector<std::string>::iterator name_ite = ch_names.end();
@@ -454,32 +467,71 @@ void handleCommandJoin(Client& client, const std::string& params) {
 	while (name_it != name_ite)
 	{
 		std::map<std::string, Channel*>::iterator channel_it = channels_.find(*name_it);
-		if (channel_it == channels_.end())
+    Channel *channel;
+
+		if (channel_it == channels_.end()) //add a new channel
 		{
-			Channel *channel = channel_it->second;
 			try
 			{
 				channels_.insert(std::make_pair(*name_it, new Channel(*name_it)));
 			}
-			catch(const std::exception& e)
+			catch(const std::exception& e) //fail
 			{
 				client_res_msg.append(":" + getServerName() + " 403 " + client.getNickname() + " " + *name_it + " :No such channel\r\n");
 				std::cerr << e.what() << '\n';
-			}
-			
-			std::string key = channels_[*name_it]->getKey();
-			bool key_correct = false;
-			if (key.empty() || (key_it != key_ite && key == *key_it))
-				key_correct = true;
-			if (key_correct)
-			{
-				client.joinChannel();
+		    name_it++;
+        if (key_it != key_ite)
+			    key_it++;
+        continue;
 			}
 		}
+    channel = channels_[*name_it];
+
+    //check key
+    std::string key = channel->getKey();
+    bool key_correct = false;
+    if (key.empty() || (key_it != key_ite && key == *key_it))
+      key_correct = true;
+    if (key_correct) //join successfully
+    {
+      client.joinChannel(*name_it);
+      
+      //message for joining client
+      std::string client_join_msg = ":" + client.getNickname() + "!" + client.getUsername() + "@" + client.getHostname() + " JOIN :" + *name_it + "\r\n";//JOIN message
+      if (!channel->getTopic().empty())
+        client_join_msg.append(":" + getServerName() + " 332 " + client.getNickname() + " " + *name_it + " :" + channel->getTopic() + "\r\n");//TOPIC message
+      else
+        client_join_msg.append(":" + getServerName() + " 331 " + client.getNickname() + " " + *name_it + " :No topic is set\r\n");//NO TOPIC message
+      //build clients NAMES
+      std::string names = client.getNickname();
+      std::map<int, Client *>::const_iterator clients_it = channel->getClients().begin();
+      std::map<int, Client *>::const_iterator clients_ite = channel->getClients().end();
+      while (clients_it != clients_ite)
+      {
+        names.append(" " + clients_it->second->getNickname());
+        clients_it++;
+      }
+      //
+      client_join_msg.append(":" + getServerName() + " 353 " + client.getNickname() + " = " + *name_it + " :" + names + "\r\n");
+      client_join_msg.append(":" + getServerName() + " 366 " + client.getNickname() + " " + *name_it + " :End of NAMES list\r\n");
+      client_res_msg.append(client_join_msg);
+      //
+
+      //message for eberybody else
+      std::string join_msg = ":" + client.getNickname() + "!" + client.getUsername() + "@" + client.getHostname() + " JOIN :" + *name_it + "\r\n";
+      queueMessageEverybodyInChannel(*channel, join_msg);
+      //
+      channel->addClient(&client);
+    }
+    else // join fail
+    {
+      client_res_msg.append(":" + getServerName() + " 475 " + client.getNickname() + " " + *name_it + " :Cannot join channel (+k)\r\n");
+    }
 		name_it++;
 		if (key_it != key_ite)
 			key_it++;
 	}
+  queueMessage(client.getFd(), client_res_msg);
 
   }
 
