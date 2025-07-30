@@ -7,11 +7,7 @@ Channel::Channel(const std::string& name) : name_(name), key_("")
     if (name.empty())
         throw std::invalid_argument("Channel name is empty");
 
-    char first_char = name[0];
-    if (!(first_char == '&'
-        || first_char == '#'
-        || first_char == '+'
-        || first_char == '!'))
+    if (!isChannelFirstCharacter(name[0]))
         throw std::invalid_argument("Channel name begin with invalid character: " + name);
     
     if (name.size() > 50)
@@ -115,4 +111,14 @@ void Channel::removeOperator(int client_fd) {
 
 bool Channel::isOperator(int client_fd) const {
     return std::find(operators_.begin(), operators_.end(), client_fd) != operators_.end();
+}
+
+bool Channel::isChannelFirstCharacter(char c)
+{
+    if (!(c == '&'
+        || c == '#'
+        || c == '+'
+        || c == '!'))
+        return (false);
+    return (true);
 }

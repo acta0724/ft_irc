@@ -350,7 +350,10 @@ private:
     } else if (upper_command == "JOIN") {
       handleCommandJoin(client, params);
       return "";
-    } else if (upper_command == "QUIT") {
+    } else if (upper_command == "PRIVMSG") {
+      handleCommandPrivmsg(client, params);
+      return "";
+    }else if (upper_command == "QUIT") {
       return "";
     } else {
       if (!client.isRegistered()) {
@@ -427,13 +430,15 @@ private:
 	return "";
 }
 
-void queueMessageEverybodyInChannel(const Channel& channel, const std::string msg)
+void queueMessageEverybodyInChannelElse(const Channel& channel, const std::string msg, int elseClientFd)
 {
   std::map<int, Client *>::const_iterator it = channel.getClients().begin();
   std::map<int, Client *>::const_iterator ite = channel.getClients().end();
   while (it != ite)
   {
-    queueMessage(it->second->getFd(), msg);
+    int fd = it->second->getFd();
+    if (fd != elseClientFd)
+      queueMessage(fd, msg);
     it++;
   }
 }
@@ -519,7 +524,7 @@ void handleCommandJoin(Client& client, const std::string& params) {
 
       //message for eberybody else
       std::string join_msg = ":" + client.getNickname() + "!" + client.getUsername() + "@" + client.getHostname() + " JOIN :" + *name_it + "\r\n";
-      queueMessageEverybodyInChannel(*channel, join_msg);
+      queueMessageEverybodyInChannelElse(*channel, join_msg, client.getFd());
       //
       channel->addClient(&client);
     }
@@ -532,7 +537,54 @@ void handleCommandJoin(Client& client, const std::string& params) {
 			key_it++;
 	}
   queueMessage(client.getFd(), client_res_msg);
+  }
 
+  void handleCommandPrivmsg(Client& client, const std::string params)
+  {
+    std::string noMsgError = ":" + getServerName() + " 412 " + client.getNickname() + " :No text to send\r\n";
+    //parse
+    size_t pos = params.find(' ');
+    std::string left;
+    std::string right;
+    
+    if (pos != std::string::npos)
+    {
+      left = params.substr(0, pos);
+      if (pos + 1 < params.size() && params[pos + 1] == ':')
+        right = params.substr(pos + 2);
+      else
+        right = params.substr(pos + 1);
+      if (right.empty()) //no message
+      {
+        queueMessage(client.getFd(), noMsgError);
+        return;
+      }
+    }
+    else // no message
+    {
+      queueMessage(client.getFd(), noMsgError);
+      return;
+    }
+    //
+
+    if (Channel::isChannelFirstCharacter(left[0])) //message to channel
+    {
+      std::map<std::string, Channel *>::iterator ch_it = channels_.find(left);
+      std::map<std::string, Channel *>::iterator ch_ite = channels_.end();
+      if (ch_it == ch_ite) //channel not found
+      {
+        std::string msg = ":" + getServerName() + " 403 " + client.getNickname() + " " + left + " :No such channel\r\n";
+        queueMessage(client.getFd(), msg);
+        return;
+      }
+      Channel& channel = *(ch_it->second);
+      std::string msg = ":" + client.getNickname() + "!" + client.getUsername() + "@" + client.getHostname() + " PRIVMSG " + left + " :" + right + "\r\n";
+      queueMessageEverybodyInChannelElse(channel, msg, client.getFd());
+    }
+    else //message to a client
+    {
+      
+    }
   }
 
   int listen_fd_;

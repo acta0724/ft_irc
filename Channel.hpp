@@ -34,6 +34,9 @@ public:
     void removeOperator(int client_fd);
     bool isOperator(int client_fd) const;
 
+    // --- Utils ---
+    static bool isChannelFirstCharacter(char c);
+
 private:
     // A channel must have a name and should not be copied.
     // Therefore, the default constructor, copy constructor,
