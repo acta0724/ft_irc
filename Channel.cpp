@@ -2,7 +2,7 @@
 #include "Client.hpp" // Clientのメソッドを使うためインクルード
 #include <algorithm>
 
-Channel::Channel(const std::string& name) : name_(name), key_("")
+Channel::Channel(const std::string& name) : name_(name), mode_(0), key_(""), user_limit_(0)
 {
     if (name.empty())
         throw std::invalid_argument("Channel name is empty");
@@ -112,6 +112,21 @@ void Channel::removeOperator(int client_fd) {
 bool Channel::isOperator(int client_fd) const {
     return std::find(operators_.begin(), operators_.end(), client_fd) != operators_.end();
 }
+
+bool Channel::isInviteOnly() const { return (mode_ & MODE_INVITE_ONLY); }
+void Channel::setInviteOnly() { mode_ |= MODE_INVITE_ONLY; }
+void Channel::unsetInviteOnly() { mode_ &= ~MODE_INVITE_ONLY; }
+bool Channel::topicLocked() const { return (mode_ & MODE_TOPIC_LOCKED); }
+void Channel::setTopicLocked() { mode_ |= MODE_TOPIC_LOCKED; }
+void Channel::unsetTopicLocked() { mode_ &= ~MODE_TOPIC_LOCKED; }
+size_t Channel::getUserLimit() { return (user_limit_); }
+void Channel::setUserLimit(size_t size) { user_limit_ = size; }
+
+void Channel::addInviteFd(int fd) { invitedFds_.insert(fd); }
+void Channel::removeInvitedFd(int fd) { invitedFds_.erase(fd); }
+bool Channel::isInvited(const Client& client) { return (invitedFds_.find(client.getFd()) != invitedFds_.end()); }
+
+bool Channel::userFull() const { return ( user_limit_ > 0 && clients_.size() >= user_limit_); }
 
 bool Channel::isChannelFirstCharacter(char c)
 {

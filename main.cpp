@@ -350,10 +350,19 @@ private:
     } else if (upper_command == "JOIN") {
       handleCommandJoin(client, params);
       return "";
-    } else if (upper_command == "PRIVMSG") {
-      handleCommandPrivmsg(client, params);
+    } else if (upper_command == "PART") {
+      handleCommandPart(client, params);
       return "";
-    }else if (upper_command == "QUIT") {
+    } else if (upper_command == "PRIVMSG") {
+      handlePrivmsg(client, params);
+      return "";
+    } else if (upper_command == "MODE") {
+      handleCommandMode(client, params);
+      return "";
+    } else if (upper_command == "INVITE") {
+      handleCommandInvite(client, params);
+      return "";
+    } else if (upper_command == "QUIT") {
       return "";
     } else {
       if (!client.isRegistered()) {
@@ -430,7 +439,7 @@ private:
 	return "";
 }
 
-void queueMessageEverybodyInChannelElse(const Channel& channel, const std::string msg, int elseClientFd)
+void queueMessageEverybodyInChannelElse(const Channel& channel, const std::string msg, int elseClientFd) //elseがない場合は無効なfd(-1など)を指定する
 {
   std::map<int, Client *>::const_iterator it = channel.getClients().begin();
   std::map<int, Client *>::const_iterator ite = channel.getClients().end();
@@ -441,6 +450,41 @@ void queueMessageEverybodyInChannelElse(const Channel& channel, const std::strin
       queueMessage(fd, msg);
     it++;
   }
+}
+
+const std::string getPrefix(const Client& client)
+{
+  return (client.getNickname() + "!" + client.getUsername() + "@" + client.getHostname());
+}
+
+void noSuchChannel(const Client& client, const std::string& channelName)
+{
+  std::string msg = ":" + getServerName() + " 403 " + client.getNickname() + " " + channelName + " :No such channel\r\n";
+  queueMessage(client.getFd(), msg);
+}
+
+void noSuchNick(const Client& client, const std::string& nickName)
+{
+  std::string msg = ":" + getServerName() + " 401 " + client.getNickname() + " " + nickName + " :No such nick/channel\r\n";
+  queueMessage(client.getFd(), msg);
+}
+
+void notEnoughParams(const Client& client, const std::string command)
+{
+  std::string msg = ":" + getServerName() + " 461 " + client.getNickname() + " " + command + " :Not enough parameters\r\n";
+  queueMessage(client.getFd(), msg);
+}
+
+void notOnChannel(const Client& client, const std::string channelName)
+{
+  std::string msg = ":" + getServerName() + " 442 " + client.getNickname() + " " + channelName + " :You're not on that channel\r\n";
+  queueMessage(client.getFd(), msg);
+}
+
+void notChannelOperator(const Client& client, const std::string channelName)
+{
+  std::string msg = ":" + getServerName() + " 442 " + client.getNickname() + " " + channelName + " :You're not channel operator\r\n";
+  queueMessage(client.getFd(), msg);
 }
 
 void handleCommandJoin(Client& client, const std::string& params) {
@@ -474,7 +518,7 @@ void handleCommandJoin(Client& client, const std::string& params) {
 		std::map<std::string, Channel*>::iterator channel_it = channels_.find(*name_it);
     Channel *channel;
 
-		if (channel_it == channels_.end()) //add a new channel
+		if (channel_it == channels_.end()) //create a new channel
 		{
 			try
 			{
@@ -494,52 +538,131 @@ void handleCommandJoin(Client& client, const std::string& params) {
 
     //check key
     std::string key = channel->getKey();
-    bool key_correct = false;
-    if (key.empty() || (key_it != key_ite && key == *key_it))
-      key_correct = true;
-    if (key_correct) //join successfully
-    {
-      client.joinChannel(*name_it);
-      
-      //message for joining client
-      std::string client_join_msg = ":" + client.getNickname() + "!" + client.getUsername() + "@" + client.getHostname() + " JOIN :" + *name_it + "\r\n";//JOIN message
-      if (!channel->getTopic().empty())
-        client_join_msg.append(":" + getServerName() + " 332 " + client.getNickname() + " " + *name_it + " :" + channel->getTopic() + "\r\n");//TOPIC message
-      else
-        client_join_msg.append(":" + getServerName() + " 331 " + client.getNickname() + " " + *name_it + " :No topic is set\r\n");//NO TOPIC message
-      //build clients NAMES
-      std::string names = client.getNickname();
-      std::map<int, Client *>::const_iterator clients_it = channel->getClients().begin();
-      std::map<int, Client *>::const_iterator clients_ite = channel->getClients().end();
-      while (clients_it != clients_ite)
-      {
-        names.append(" " + clients_it->second->getNickname());
-        clients_it++;
-      }
-      //
-      client_join_msg.append(":" + getServerName() + " 353 " + client.getNickname() + " = " + *name_it + " :" + names + "\r\n");
-      client_join_msg.append(":" + getServerName() + " 366 " + client.getNickname() + " " + *name_it + " :End of NAMES list\r\n");
-      client_res_msg.append(client_join_msg);
-      //
-
-      //message for eberybody else
-      std::string join_msg = ":" + client.getNickname() + "!" + client.getUsername() + "@" + client.getHostname() + " JOIN :" + *name_it + "\r\n";
-      queueMessageEverybodyInChannelElse(*channel, join_msg, client.getFd());
-      //
-      channel->addClient(&client);
-    }
-    else // join fail
+    if (!(key.empty() || (key_it != key_ite && key == *key_it)))
     {
       client_res_msg.append(":" + getServerName() + " 475 " + client.getNickname() + " " + *name_it + " :Cannot join channel (+k)\r\n");
+      name_it++;
+      if (key_it != key_ite)
+        key_it++;
+      continue;
     }
-		name_it++;
-		if (key_it != key_ite)
-			key_it++;
-	}
+
+    //invite check
+    if (channel->isInvited(client)) //remove invitation
+      channel->removeInvitedFd(client.getFd());
+    else if (channel->isInviteOnly()) //not invited but need invitation
+    {
+      client_res_msg.append(":" + getServerName() + " 473 " + client.getNickname() + " " + *name_it + " :Cannot join channel (+i)\r\n");
+      name_it++;
+      if (key_it != key_ite)
+        key_it++;
+      continue;
+    }
+
+    //channel limit check
+    if (channel->userFull())
+    {
+      client_res_msg.append(":" + getServerName() + " 471 " + client.getNickname() + " " + *name_it + " :Cannot join channel (+l)\r\n");
+      if (key_it != key_ite)
+        key_it++;
+      continue;
+    }
+
+    // --- join successfully ---
+    client.joinChannel(*name_it);
+    
+    //message for joining client
+    std::string client_join_msg = ":" + getPrefix(client) + " JOIN :" + *name_it + "\r\n";//JOIN message
+    if (!channel->getTopic().empty())
+      client_join_msg.append(":" + getServerName() + " 332 " + client.getNickname() + " " + *name_it + " :" + channel->getTopic() + "\r\n");//TOPIC message
+    else
+      client_join_msg.append(":" + getServerName() + " 331 " + client.getNickname() + " " + *name_it + " :No topic is set\r\n");//NO TOPIC message
+    //build clients NAMES
+    std::string names = client.getNickname();
+    std::map<int, Client *>::const_iterator clients_it = channel->getClients().begin();
+    std::map<int, Client *>::const_iterator clients_ite = channel->getClients().end();
+    while (clients_it != clients_ite)
+    {
+      names.append(" " + clients_it->second->getNickname());
+      clients_it++;
+    }
+    //
+    client_join_msg.append(":" + getServerName() + " 353 " + client.getNickname() + " = " + *name_it + " :" + names + "\r\n");
+    client_join_msg.append(":" + getServerName() + " 366 " + client.getNickname() + " " + *name_it + " :End of NAMES list\r\n");
+    client_res_msg.append(client_join_msg);
+    //
+
+    //message for eberybody else
+    std::string join_msg = ":" + getPrefix(client) + " JOIN :" + *name_it + "\r\n";
+    queueMessageEverybodyInChannelElse(*channel, join_msg, client.getFd());
+    //
+    channel->addClient(&client);
+
+    name_it++;
+    if (key_it != key_ite)
+      key_it++;
+  }
   queueMessage(client.getFd(), client_res_msg);
   }
 
-  void handleCommandPrivmsg(Client& client, const std::string params)
+  void handleCommandPart(Client& client, const std::string params)
+  {
+    //parse
+    std::vector<std::string> channels;
+    std::string leaveMsg;
+    bool hasMsg = false;
+
+    size_t pos = params.find(' ');
+    if (pos != std::string::npos)
+    {
+      std::string channels_str = params.substr(0, pos);
+      leaveMsg = params.substr(pos + 1);
+      if (leaveMsg[0] == ':')
+        leaveMsg.erase(0, 1);
+      channels = str_split_to_vector(channels_str, ',');
+      hasMsg = true;
+    }
+    else
+    {
+      channels = str_split_to_vector(params, ',');
+      leaveMsg = "";
+    }
+    if (channels.size() < 1)
+    {
+      notEnoughParams(client, "PART");
+      return;
+    }
+    //
+
+    std::vector<std::string>::iterator it = channels.begin();
+    std::vector<std::string>::iterator ite = channels.end();
+    while (it != ite)
+    {
+      std::map<std::string, Channel *>::iterator ch_it = channels_.find(*it);
+      if (ch_it != channels_.end())
+      {
+        Channel *channel = ch_it->second;
+        if (channel->hasClient(client.getFd()))
+        {
+          channel->removeClient(client.getFd());
+          std::string msg;
+          if (hasMsg)
+            msg = ":" + getPrefix(client) + " PART " + *it + " :" + leaveMsg + "\r\n";
+          else
+            msg = ":" + getPrefix(client) + " PART " + *it + "\r\n";
+          queueMessageEverybodyInChannelElse(*channel, msg, client.getFd());
+          queueMessage(client.getFd(), msg);
+        }
+        else // client not on channel
+          notOnChannel(client, *it);
+      }
+      else //channel not found
+        noSuchChannel(client, *it);
+      it++;
+    }
+  }
+
+  void handlePrivmsg(Client& client, const std::string params)
   {
     std::string noMsgError = ":" + getServerName() + " 412 " + client.getNickname() + " :No text to send\r\n";
     //parse
@@ -573,8 +696,7 @@ void handleCommandJoin(Client& client, const std::string& params) {
       std::map<std::string, Channel *>::iterator ch_ite = channels_.end();
       if (ch_it == ch_ite) //channel not found
       {
-        std::string msg = ":" + getServerName() + " 403 " + client.getNickname() + " " + left + " :No such channel\r\n";
-        queueMessage(client.getFd(), msg);
+        noSuchChannel(client, left);
         return;
       }
       Channel& channel = *(ch_it->second);
@@ -583,8 +705,249 @@ void handleCommandJoin(Client& client, const std::string& params) {
     }
     else //message to a client
     {
-      
+      std::map<int, Client *>::iterator it = clients_.begin();
+      std::map<int, Client *>::iterator ite = clients_.end();
+      while (it != ite)
+      {
+        Client *target = it->second;
+        if (target->getNickname() == left)
+        {
+          std::string msg = ":" + getPrefix(client) + " PRIVMSG " + left + " :" + right + "\r\n";
+          queueMessage(target->getFd(), msg);
+          return;
+        }
+        it++;
+      }
+      noSuchNick(client, left);
     }
+  }
+
+  void handleCommandMode(Client& client, const std::string& params) //複数未対応(+o bob +lなど)
+  {
+    //parse
+    Channel *channel;
+    
+    std::vector<std::string> paramsV = str_split_to_vector(params, ' ');
+    if (paramsV.size() == 0)
+    {
+      notEnoughParams(client, "MODE");
+      return;
+    }
+    std::vector<std::string>::iterator it = paramsV.begin();
+    std::vector<std::string>::iterator ite = paramsV.end();
+    //channel check
+    std::map<std::string, Channel*>::iterator ch_it = channels_.find(*it);
+    if (ch_it != channels_.end())
+      channel = ch_it->second;
+    else
+    {
+      noSuchChannel(client, *it);
+      return;
+    }
+    it++;
+
+    if(!channel->hasClient(client.getFd())) //client not on channel
+    {
+      notOnChannel(client, channel->getName());
+      return;
+    }
+    if (!channel->isOperator(client.getFd())) //not an operator
+    {
+      notChannelOperator(client, channel->getName());
+        return;
+    }
+
+    //parse mode and param
+    std::string mode;
+    std::string param = "";
+    std::string ch_name = channel->getName();
+    bool hasParam = false;
+    if (it != ite)
+    {
+      mode = *it;
+      it++;
+    }
+    else
+    {
+      notEnoughParams(client, "MODE");
+      return;
+    }
+
+    if (it != ite)
+    {
+      param = *it;
+      hasParam = true;
+    }
+
+    if (mode == "+i")
+    {
+      channel->setInviteOnly();
+    }
+    else if (mode == "-i")
+    {
+      channel->unsetInviteOnly();
+    }
+    else if (mode == "+t")
+    {
+      channel->setTopicLocked();
+    }
+    else if (mode == "-t")
+    {
+      channel->unsetTopicLocked();
+    }
+    else if (mode == "+k")
+    {
+      if (!hasParam)
+      {
+        notEnoughParams(client, "MODE");
+        return;
+      }
+      channel->setKey(param);
+    }
+    else if (mode == "-k")
+    {
+      channel->setKey("");
+    }
+    else if (mode == "+o")
+    {
+      if (!hasParam)
+      {
+        notEnoughParams(client, "MODE");
+        return;
+      }
+      Client *target = &client;
+      std::map<int, Client *>::iterator c_it = clients_.begin();
+      std::map<int, Client *>::iterator c_ite = clients_.end();
+      while (c_it != c_ite)
+      {
+        if (c_it->second->getNickname() == param)
+        {
+          target = c_it->second;
+          break ;
+        }
+        c_it++;
+      }
+      if (target == &client) //nickname not found
+      {
+        noSuchNick(client, param);
+        return;
+      }
+      channel->addOperator(target->getFd());
+    }
+    else if (mode == "-o")
+    {
+      if (!hasParam)
+      {
+        notEnoughParams(client, "MODE");
+        return;
+      }
+      Client *target = &client;
+      std::map<int, Client *>::iterator c_it = clients_.begin();
+      std::map<int, Client *>::iterator c_ite = clients_.end();
+      while (c_it != c_ite)
+      {
+        if (c_it->second->getNickname() == param)
+        {
+          target = c_it->second;
+          break ;
+        }
+        c_it++;
+      }
+      if (target == &client) //nickname not found
+      {
+        noSuchNick(client, param);
+        return;
+      }
+      channel->addOperator(target->getFd());
+      channel->removeOperator(client.getFd());
+    }
+    else if (mode == "+l")
+    {
+      if (!hasParam)
+      {
+        notEnoughParams(client, "MODE");
+        return;
+      }
+      size_t size = static_cast<size_t>(atoi(param.c_str()));
+      channel->setUserLimit(size);
+    }
+    else if (mode == "-l")
+    {
+      channel->setUserLimit(0);
+    }
+    else //unknown mdoe
+    {
+      std::string msg = ":" + getServerName() + " 472 " + client.getNickname() + " " + mode[1] + " :is unknown mode char to me\r\n";
+      queueMessage(client.getFd(), msg);
+      return;
+    }
+    std::string msg;
+    if (hasParam)
+      msg = ":" + getPrefix(client) + " MODE " + ch_name + " " + mode + " " + param + "\r\n";
+    else
+      msg = ":" + getPrefix(client) + " MODE " + ch_name + " " + mode + "\r\n";
+    queueMessageEverybodyInChannelElse(*channel, msg, -1);
+  }
+
+  void handleCommandInvite(Client& client, const std::string& params)
+  {
+    //parse
+    std::vector<std::string> paramsV = str_split_to_vector(params, ' ');
+    if (paramsV.size() < 2)
+    {
+      notEnoughParams(client, "INVITE");
+      return;
+    }
+    const std::string targetName = paramsV[0];
+    std::string ch_name = paramsV[1];
+    //
+
+    Client *target = &client;
+    std::map<int, Client *>::iterator c_it = clients_.begin();
+    std::map<int, Client *>::iterator c_ite = clients_.end();
+    while (c_it != c_ite)
+    {
+      if (c_it->second->getNickname() == targetName)
+      {
+        target = c_it->second;
+        break ;
+      }
+      c_it++;
+    }
+    if (target == &client) //nickname not found
+    {
+      noSuchNick(client, targetName);
+      return;
+    }
+
+    Channel *channel;
+    bool channelExist = true;
+    std::map<std::string, Channel *>::iterator ch_it = channels_.find(ch_name);
+    if (ch_it != channels_.end())
+      channel = ch_it->second;
+    else //channel not found
+      channelExist = false;
+
+    if(channelExist) //client not on channel
+    {
+      if (!channel->hasClient(client.getFd())) //not on channel
+      {
+        notOnChannel(client, channel->getName());
+        return;
+      }
+      if (channel->isInviteOnly() && !channel->isOperator(client.getFd())) //not an operator
+      {
+        notChannelOperator(client, ch_name);
+        return;
+      }
+      
+      channel->addInviteFd(target->getFd());
+    }
+
+    std::string targetMsg = ":" + getPrefix(client) + " INVITE " + targetName + " " + ch_name + "\r\n";
+    std::string clientMsg = ":" + getServerName() + " 342 " + client.getNickname() + " " + targetName + " " + ch_name + "\r\n";
+    queueMessage(target->getFd(), targetMsg);
+    queueMessage(client.getFd(), clientMsg);
   }
 
   int listen_fd_;

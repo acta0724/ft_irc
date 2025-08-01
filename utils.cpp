@@ -4,9 +4,22 @@ std::vector<std::string> str_split_to_vector(const std::string& str, char delimi
     std::vector<std::string> result;
     std::stringstream ss(str);
     std::string item;
-    while (std::getline(ss, item, delimiter)) {
+    std::string item2;
+    while (std::getline(ss, item, delimiter))
+    {
         if (!item.empty())
-            result.push_back(item);
+        {
+            if (item[0] == ':')
+            {
+                while (std::getline(ss, item2))
+                    item.append(item2);
+                item.erase(item[0]);
+                result.push_back(item);
+                break;
+            }
+            else
+                result.push_back(item);
+        }
     }
     return result;
 }
