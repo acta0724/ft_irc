@@ -13,7 +13,7 @@ std::vector<std::string> str_split_to_vector(const std::string& str, char delimi
             {
                 while (std::getline(ss, item2))
                     item.append(item2);
-                item.erase(item[0]);
+                item.erase(0, 1);
                 result.push_back(item);
                 break;
             }

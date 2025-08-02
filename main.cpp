@@ -359,8 +359,14 @@ private:
     } else if (upper_command == "MODE") {
       handleCommandMode(client, params);
       return "";
+    } else if (upper_command == "TOPIC") {
+      handleCommandTopic(client, params);
+      return "";
     } else if (upper_command == "INVITE") {
       handleCommandInvite(client, params);
+      return "";
+    } else if (upper_command == "KICK") {
+      handleCommandKick(client, params);
       return "";
     } else if (upper_command == "QUIT") {
       return "";
@@ -484,6 +490,12 @@ void notOnChannel(const Client& client, const std::string channelName)
 void notChannelOperator(const Client& client, const std::string channelName)
 {
   std::string msg = ":" + getServerName() + " 442 " + client.getNickname() + " " + channelName + " :You're not channel operator\r\n";
+  queueMessage(client.getFd(), msg);
+}
+
+void userNotInChannel(const Client& client, const std::string channelName, const std::string targetName)
+{
+  std::string msg = ":" + getServerName() + " 441 " + client.getNickname() + " " + targetName + " " + channelName + " :They aren't on that channel\r\n";;
   queueMessage(client.getFd(), msg);
 }
 
@@ -645,6 +657,7 @@ void handleCommandJoin(Client& client, const std::string& params) {
         if (channel->hasClient(client.getFd()))
         {
           channel->removeClient(client.getFd());
+          client.leaveChannel(*it);
           std::string msg;
           if (hasMsg)
             msg = ":" + getPrefix(client) + " PART " + *it + " :" + leaveMsg + "\r\n";
@@ -940,7 +953,7 @@ void handleCommandJoin(Client& client, const std::string& params) {
         notChannelOperator(client, ch_name);
         return;
       }
-      
+
       channel->addInviteFd(target->getFd());
     }
 
@@ -948,6 +961,189 @@ void handleCommandJoin(Client& client, const std::string& params) {
     std::string clientMsg = ":" + getServerName() + " 342 " + client.getNickname() + " " + targetName + " " + ch_name + "\r\n";
     queueMessage(target->getFd(), targetMsg);
     queueMessage(client.getFd(), clientMsg);
+  }
+
+  void handleCommandTopic(Client& client, const std::string& params)
+  {
+    //parse
+    std::vector<std::string> paramsV = str_split_to_vector(params, ' ');
+    std::string ch_name;
+    std::string topic = "";
+    if (paramsV.size() < 1)
+    {
+      notEnoughParams(client, "TOPIC");
+      return;
+    }
+    //
+
+    Channel *channel;
+    ch_name = paramsV[0];
+    //error handling
+    std::map<std::string, Channel *>::iterator it = channels_.find(ch_name);
+    if (it == channels_.end()) // no such nhannel
+    {
+      noSuchChannel(client, ch_name);
+      return;
+    }
+    else
+      channel = it->second;
+
+    if (!channel->hasClient(client.getFd())) //not on channel
+    {
+      notOnChannel(client, ch_name);
+      return;
+    }
+
+    if (channel->topicLocked() && !channel->isOperator(client.getFd())) // not operator
+    {
+      notChannelOperator(client, ch_name);
+      return;
+    }
+    //
+
+    //success
+    if (paramsV.size() == 1)
+    {
+      if (channel->getTopic() != "")
+      {
+        std::string msg = ":" + getServerName() + " 332 " + client.getNickname() + " " + ch_name + " :" + channel->getTopic() + "\r\n";
+        queueMessage(client.getFd(), msg);
+        return;
+      }
+      else
+      {
+        std::string msg = ":" + getServerName() + " 331 " + client.getNickname() + " " + ch_name + " :No topic is set\r\n";
+        queueMessage(client.getFd(), msg);
+        return;
+      }
+    }
+    else if (paramsV.size() == 2)
+    {
+      std::string topic = paramsV[1];
+      if (!topic.empty())
+      {
+        channel->setTopic(topic);
+        std::string msg = ":" + getPrefix(client) + " TOPIC " + ch_name + " :" + topic + "\r\n";
+        queueMessageEverybodyInChannelElse(*channel, msg, -1);
+      }
+      else
+      {
+        channel->setTopic("");
+        std::string msg = ":" + getPrefix(client) + " TOPIC " + ch_name + " :\r\n";
+        queueMessageEverybodyInChannelElse(*channel, msg, -1);
+      }
+    }
+  }
+
+  void handleCommandKick(Client& client, const std::string& params) 
+  {
+    //parse
+    std::vector<std::string> paramsV = str_split_to_vector(params, ' ');
+    if (!(paramsV.size() == 2 || paramsV.size() == 3)) //invalid size of parameter
+    {
+      notEnoughParams(client, "KICK");
+      return;
+    }
+
+    std::vector<std::string> channels = str_split_to_vector(paramsV[0], ',');
+    std::vector<std::string> eject_users = str_split_to_vector(paramsV[1], ',');
+
+    if (!channels.size() || !eject_users.size() || !(channels.size() == 1 || channels.size() == eject_users.size())) //size not match
+    {
+      notEnoughParams(client, "KICK");
+      return;
+    }
+
+    std::vector<std::string>::iterator ch_it = channels.begin();
+    std::vector<std::string>::iterator username_it = eject_users.begin();
+    std::vector<std::string>::iterator username_ite = eject_users.end();
+    while (username_it != username_ite)
+    {
+      //get channel
+      std::map<std::string, Channel *>::iterator it = channels_.find(*ch_it);
+      Channel *channel;
+      if (it != channels_.end())
+        channel = it->second;
+      else
+      {
+        noSuchChannel(client, *ch_it);
+        if (channels.size() != 1)
+          ch_it++;
+        username_it++;
+        continue;
+      }
+
+      if (!channel->hasClient(client.getFd())) // client not on channel
+      {
+        notOnChannel(client, *ch_it);
+        if (channels.size() != 1)
+          ch_it++;
+        username_it++;
+        continue ;
+      }
+
+      if (!channel->isOperator(client.getFd())) // is not operator
+      {
+        notChannelOperator(client, *ch_it);
+        if (channels.size() != 1)
+          ch_it++;
+        username_it++;
+        continue ;
+      }
+
+      //get target
+      std::map<int, Client *>::iterator client_it = clients_.begin();
+      std::map<int, Client *>::iterator client_ite = clients_.end();
+      Client *target;
+      while (client_it != client_ite)
+      {
+        if (client_it->second->getNickname() == *username_it)
+        {
+          target = client_it->second;
+          break ;
+        }
+        client_it++;
+      }
+      if (client_it == client_ite)
+      {
+        noSuchNick(client, *username_it);
+        if (channels.size() != 1)
+          ch_it++;
+        username_it++;
+        continue;
+      }
+      if (target->getFd() == client.getFd())
+      {
+        std::string msg = ":" + getServerName() + " 482 " + client.getNickname() + " " + *ch_it + " :You can't kick yourself\r\n";
+        queueMessage(client.getFd(), msg);
+        if (channels.size() != 1)
+          ch_it++;
+        username_it++;
+        continue;
+      }
+
+      if (!channel->hasClient(target->getFd())) //user not in channel
+      {
+        userNotInChannel(client, *ch_it, *username_it);
+        if (channels.size() != 1)
+          ch_it++;
+        username_it++;
+        continue;
+      }
+
+      std::string msg;
+      if (paramsV.size() == 2) // no comment
+        msg = ":" + getPrefix(client) + " KICK " + *ch_it + " " + *username_it + "\r\n";
+      if (paramsV.size() == 3)
+        msg = ":" + getPrefix(client) + " KICK " + *ch_it + " " + *username_it + " :" + paramsV[2] + "\r\n";
+      queueMessageEverybodyInChannelElse(*channel, msg, -1);
+
+      channel->removeClient(target->getFd());
+      target->leaveChannel(*ch_it);
+      if (channels.size() != 1)
+          ch_it++;
+      username_it++;
+    }
   }
 
   int listen_fd_;
