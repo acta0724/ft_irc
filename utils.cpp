@@ -1,5 +1,7 @@
 #include "utils.hpp"
 
+
+#include <iostream>
 std::vector<std::string> str_split_to_vector(const std::string& str, char delimiter) {
     std::vector<std::string> result;
     std::stringstream ss(str);
@@ -12,7 +14,7 @@ std::vector<std::string> str_split_to_vector(const std::string& str, char delimi
             if (item[0] == ':')
             {
                 while (std::getline(ss, item2))
-                    item.append(item2);
+                    item.append(" " + item2);
                 item.erase(0, 1);
                 result.push_back(item);
                 break;
