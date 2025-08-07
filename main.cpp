@@ -854,7 +854,6 @@ void handleCommandJoin(Client& client, const std::string& params) {
           if (paramit == paramite)
           {
             notEnoughParams(client, "MODE");
-            paramit++;
             continue;
           }
           channel->setKey(*paramit);
