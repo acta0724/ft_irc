@@ -22,6 +22,7 @@
 #define MAX_CONNECTIONS 100  // 最大接続数
 #define MAX_NICKNAME_LENGTH 9  // RFC 1459に基づくニックネームの最大長
 #define MAX_MESSAGE_LENGTH 512  // RFC 1459に基づくメッセージの最大長
+#define MODE_MAXCHANGE 3  // RFC 2812に基づくMODEコマンドが一度に設定できるコマンドの最大数
 
 #ifndef nullptr
 # define nullptr (0)
@@ -835,7 +836,7 @@ void handleCommandJoin(Client& client, const std::string& params) {
     if (plusminus == '+')
     {
       success_change.push_back('+');
-      for (unsigned long i = 0; i < 3 && i < modes.size(); i++)
+      for (unsigned long i = 0; i < MODE_MAXCHANGE && i < modes.size(); i++)
       {
         if (modes[i] == 'i')
         {
@@ -894,16 +895,20 @@ void handleCommandJoin(Client& client, const std::string& params) {
             notEnoughParams(client, "MODE");
             continue;
           }
+          bool notDigit = false;
           for (unsigned long j = 0; j < paramit->size(); j++)
           {
             if (!isdigit((*paramit)[j]))
             {
-              std::string msg = ":" + getServerName() + " 461 " + client.getNickname() + " " + "MODE" + " :Not enough parameter " + *paramit + "\r\n";
+              std::string msg = ":" + getServerName() + " 461 " + client.getNickname() + " " + "MODE" + " :Invalid parameter " + *paramit + "\r\n";
               queueMessage(client.getFd(), msg);
               paramit++;
-              continue;
+              notDigit = true;
+              break;
             }
           }
+          if (notDigit)
+            continue;
           size_t size = static_cast<size_t>(atoi((*paramit).c_str()));
           channel->setUserLimit(size);
           success_change.push_back('l');
@@ -911,7 +916,6 @@ void handleCommandJoin(Client& client, const std::string& params) {
         }
         else //unknown mdoe
         {
-          std::cout << "--- test1 [" << modes[i] << "] ---\n";
           std::string msg = ":" + getServerName() + " 472 " + client.getNickname() + " " + modes[i] + " :is unknown mode char to me\r\n";
           queueMessage(client.getFd(), msg);
           continue;
@@ -921,7 +925,7 @@ void handleCommandJoin(Client& client, const std::string& params) {
     else if (plusminus == '-')
     {
       success_change.push_back('-');
-      for (unsigned long i = 0; i < 3 && i < modes.size(); i++)
+      for (unsigned long i = 0; i < MODE_MAXCHANGE && i < modes.size(); i++)
       {
         if (modes[i] == 'i')
         {
@@ -974,7 +978,6 @@ void handleCommandJoin(Client& client, const std::string& params) {
         }
         else //unknown mdoe
         {
-          std::cout << "--- test2 [" << modes[i] << "] ---\n";
           std::string msg = ":" + getServerName() + " 472 " + client.getNickname() + " " + modes[i] + " :is unknown mode char to me\r\n";
           queueMessage(client.getFd(), msg);
           continue;
@@ -983,7 +986,6 @@ void handleCommandJoin(Client& client, const std::string& params) {
     }
     else //unknown mdoe
     {
-      std::cout << "--- test3 [" << plusminus << "] ---\n";
       std::string msg = ":" + getServerName() + " 472 " + client.getNickname() + " " + plusminus + " :is unknown mode char to me\r\n";
       queueMessage(client.getFd(), msg);
       return;
