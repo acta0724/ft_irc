@@ -808,6 +808,7 @@ void handleCommandJoin(Client& client, const std::string& params) {
     std::vector<char> modes;
     std::vector<std::string> mode_params;
     std::string success_change;
+    std::string success_params;
     std::string ch_name = channel->getName();
     if (it != ite) //get mode
     {
@@ -853,10 +854,12 @@ void handleCommandJoin(Client& client, const std::string& params) {
           if (paramit == paramite)
           {
             notEnoughParams(client, "MODE");
+            paramit++;
             continue;
           }
           channel->setKey(*paramit);
           success_change.push_back('k');
+          success_params.append(" " + *paramit);
           paramit++;
         }
         else if (modes[i] == 'o')
@@ -886,6 +889,7 @@ void handleCommandJoin(Client& client, const std::string& params) {
           }
           channel->addOperator(target->getFd());
           success_change.push_back('o');
+          success_params.append(" " + *paramit);
           paramit++;
         }
         else if (modes[i] == 'l')
@@ -912,6 +916,7 @@ void handleCommandJoin(Client& client, const std::string& params) {
           size_t size = static_cast<size_t>(atoi((*paramit).c_str()));
           channel->setUserLimit(size);
           success_change.push_back('l');
+          success_params.append(" " + *paramit);
           paramit++;
         }
         else //unknown mdoe
@@ -969,6 +974,7 @@ void handleCommandJoin(Client& client, const std::string& params) {
           }
           channel->removeOperator(target->getFd());
           success_change.push_back('o');
+          success_params.append(" " + *paramit);
           paramit++;
         }
         else if (modes[i] == 'l')
@@ -995,12 +1001,7 @@ void handleCommandJoin(Client& client, const std::string& params) {
     {
       std::string msg;
       if (mode_params.size() != 0)
-      {
-        msg = ":" + getPrefix(client) + " MODE " + ch_name + " " + success_change;
-        for (unsigned long i = 0; i < mode_params.size(); i++)
-          msg.append(" " + mode_params[i]);
-        msg.append("\r\n");
-      }
+        msg = ":" + getPrefix(client) + " MODE " + ch_name + " " + success_change + success_params + "\r\n";
       else
         msg = ":" + getPrefix(client) + " MODE " + ch_name + " " + success_change + "\r\n";
       queueMessageEverybodyInChannelElse(*channel, msg, -1);
