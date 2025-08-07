@@ -198,6 +198,20 @@ private:
     std::map<int, Client*>::iterator it = clients_.find(client_fd);
     if (it != clients_.end()) {
       std::cout << ", nickname=" << it->second->getNickname();
+      if (it->second->getChannels().size() > 0)
+      {
+        std::vector<std::string>::const_iterator chname_it = it->second->getChannels().begin();
+        std::vector<std::string>::const_iterator chname_ite = it->second->getChannels().end();
+        while (chname_it != chname_ite)
+        {
+          std::map<std::string, Channel *>::iterator channel_it = channels_.find(*chname_it);
+          if (channel_it != channels_.end())
+          {
+            handleCommandQuit(*(it->second), ":Client closed connection");
+          }
+          chname_it++;
+        }
+      }
       delete it->second; // 動的に確保したメモリを解放
       clients_.erase(it);
     }
@@ -335,7 +349,13 @@ private:
     for (size_t i = 0; i < upper_command.length(); ++i) {
         upper_command[i] = toupper(upper_command[i]);
     }
-    if (upper_command == "PASS") {
+
+    if (upper_command == "PING") {
+      return "PONG " + getServerName() + " :" + (params.empty() ? getServerName() : params) + "\r\n";
+    } else if (upper_command == "QUIT") {
+      handleCommandQuit(client, params);
+      return "";
+    } else if (upper_command == "PASS") {
       return handleCommandPass(client, params);
     }
     if (!client.isAuthenticated()) {
@@ -345,9 +365,12 @@ private:
       return handleCommandNick(client, params);
     } else if (upper_command == "USER") {
       return handleCommandUser(client, params);
-    }  else if (upper_command == "PING") {
-      return "PONG " + getServerName() + " :" + (params.empty() ? getServerName() : params) + "\r\n";
-    } else if (upper_command == "JOIN") {
+    }
+    if (!client.isRegistered()) {
+        return ":" + getServerName() + " 451 " + client.getNickname() + " :You have not registered\r\n";
+    }
+    
+    if (upper_command == "JOIN") {
       handleCommandJoin(client, params);
       return "";
     } else if (upper_command == "PART") {
@@ -368,13 +391,7 @@ private:
     } else if (upper_command == "KICK") {
       handleCommandKick(client, params);
       return "";
-    } else if (upper_command == "QUIT") {
-      handleCommandQuit(client, params);
-      return "";
-    } else {
-      if (!client.isRegistered()) {
-        return ":" + getServerName() + " 451 " + client.getNickname() + " :You have not registered\r\n";
-      }
+    }  else {
       return ":" + getServerName() + " 421 " + client.getNickname() + " " + upper_command + " :Unknown command\r\n";
     }
   }
@@ -786,13 +803,18 @@ void handleCommandJoin(Client& client, const std::string& params) {
     }
 
     //parse mode and param
-    std::string mode;
-    std::string param = "";
+    char plusminus;
+    std::vector<char> modes;
+    std::vector<std::string> mode_params;
+    std::string success_change;
     std::string ch_name = channel->getName();
-    bool hasParam = false;
-    if (it != ite)
+    if (it != ite) //get mode
     {
-      mode = *it;
+      plusminus = (*it)[0];
+      for (unsigned long i = 1; i < (*it).size(); i++)
+      {
+        modes.push_back((*it)[i]);
+      }
       it++;
     }
     else
@@ -801,119 +823,186 @@ void handleCommandJoin(Client& client, const std::string& params) {
       return;
     }
 
-    if (it != ite)
+    while (it != ite)//get params
     {
-      param = *it;
-      hasParam = true;
+      mode_params.push_back(*it);
+      it++;
     }
+    //
 
-    if (mode == "+i")
+    std::vector<std::string>::iterator paramit = mode_params.begin();
+    std::vector<std::string>::iterator paramite = mode_params.end();
+    if (plusminus == '+')
     {
-      channel->setInviteOnly();
-    }
-    else if (mode == "-i")
-    {
-      channel->unsetInviteOnly();
-    }
-    else if (mode == "+t")
-    {
-      channel->setTopicLocked();
-    }
-    else if (mode == "-t")
-    {
-      channel->unsetTopicLocked();
-    }
-    else if (mode == "+k")
-    {
-      if (!hasParam)
+      success_change.push_back('+');
+      for (unsigned long i = 0; i < 3 && i < modes.size(); i++)
       {
-        notEnoughParams(client, "MODE");
-        return;
-      }
-      channel->setKey(param);
-    }
-    else if (mode == "-k")
-    {
-      channel->setKey("");
-    }
-    else if (mode == "+o")
-    {
-      if (!hasParam)
-      {
-        notEnoughParams(client, "MODE");
-        return;
-      }
-      Client *target = &client;
-      std::map<int, Client *>::iterator c_it = clients_.begin();
-      std::map<int, Client *>::iterator c_ite = clients_.end();
-      while (c_it != c_ite)
-      {
-        if (c_it->second->getNickname() == param)
+        if (modes[i] == 'i')
         {
-          target = c_it->second;
-          break ;
+          channel->setInviteOnly();
+          success_change.push_back('i');
         }
-        c_it++;
-      }
-      if (target == &client) //nickname not found
-      {
-        noSuchNick(client, param);
-        return;
-      }
-      channel->addOperator(target->getFd());
-    }
-    else if (mode == "-o")
-    {
-      if (!hasParam)
-      {
-        notEnoughParams(client, "MODE");
-        return;
-      }
-      Client *target = &client;
-      std::map<int, Client *>::iterator c_it = clients_.begin();
-      std::map<int, Client *>::iterator c_ite = clients_.end();
-      while (c_it != c_ite)
-      {
-        if (c_it->second->getNickname() == param)
+        else if (modes[i] == 't')
         {
-          target = c_it->second;
-          break ;
+          channel->setTopicLocked();
+          success_change.push_back('t');
         }
-        c_it++;
+        else if (modes[i] == 'k')
+        {
+          if (paramit == paramite)
+          {
+            notEnoughParams(client, "MODE");
+            continue;
+          }
+          channel->setKey(*paramit);
+          success_change.push_back('k');
+          paramit++;
+        }
+        else if (modes[i] == 'o')
+        {
+          if (paramit == paramite)
+          {
+            notEnoughParams(client, "MODE");
+            continue;
+          }
+          Client *target = &client;
+          std::map<int, Client *>::iterator c_it = clients_.begin();
+          std::map<int, Client *>::iterator c_ite = clients_.end();
+          while (c_it != c_ite)
+          {
+            if (c_it->second->getNickname() == *paramit)
+            {
+              target = c_it->second;
+              break ;
+            }
+            c_it++;
+          }
+          if (target == &client) //nickname not found
+          {
+            noSuchNick(client, *paramit);
+            paramit++;
+            continue;
+          }
+          channel->addOperator(target->getFd());
+          success_change.push_back('o');
+          paramit++;
+        }
+        else if (modes[i] == 'l')
+        {
+          if (paramit == paramite)
+          {
+            notEnoughParams(client, "MODE");
+            continue;
+          }
+          for (unsigned long j = 0; j < paramit->size(); j++)
+          {
+            if (!isdigit((*paramit)[j]))
+            {
+              std::string msg = ":" + getServerName() + " 461 " + client.getNickname() + " " + "MODE" + " :Not enough parameter " + *paramit + "\r\n";
+              queueMessage(client.getFd(), msg);
+              paramit++;
+              continue;
+            }
+          }
+          size_t size = static_cast<size_t>(atoi((*paramit).c_str()));
+          channel->setUserLimit(size);
+          success_change.push_back('l');
+          paramit++;
+        }
+        else //unknown mdoe
+        {
+          std::cout << "--- test1 [" << modes[i] << "] ---\n";
+          std::string msg = ":" + getServerName() + " 472 " + client.getNickname() + " " + modes[i] + " :is unknown mode char to me\r\n";
+          queueMessage(client.getFd(), msg);
+          continue;
+        }
       }
-      if (target == &client) //nickname not found
-      {
-        noSuchNick(client, param);
-        return;
-      }
-      channel->removeOperator(target->getFd());
     }
-    else if (mode == "+l")
+    else if (plusminus == '-')
     {
-      if (!hasParam)
+      success_change.push_back('-');
+      for (unsigned long i = 0; i < 3 && i < modes.size(); i++)
       {
-        notEnoughParams(client, "MODE");
-        return;
+        if (modes[i] == 'i')
+        {
+          channel->unsetInviteOnly();
+          success_change.push_back('i');
+        }
+        else if (modes[i] == 't')
+        {
+          channel->unsetTopicLocked();
+          success_change.push_back('t');
+        }
+        else if (modes[i] == 'k')
+        {
+          channel->setKey("");
+          success_change.push_back('k');
+        }
+        else if (modes[i] == 'o')
+        {
+          if (paramit == paramite)
+          {
+            notEnoughParams(client, "MODE");
+            continue;
+          }
+          Client *target = &client;
+          std::map<int, Client *>::iterator c_it = clients_.begin();
+          std::map<int, Client *>::iterator c_ite = clients_.end();
+          while (c_it != c_ite)
+          {
+            if (c_it->second->getNickname() == *paramit)
+            {
+              target = c_it->second;
+              break ;
+            }
+            c_it++;
+          }
+          if (target == &client) //nickname not found
+          {
+            noSuchNick(client, *paramit);
+            paramit++;
+            continue;
+          }
+          channel->removeOperator(target->getFd());
+          success_change.push_back('o');
+          paramit++;
+        }
+        else if (modes[i] == 'l')
+        {
+          channel->setUserLimit(0);
+          success_change.push_back('l');
+        }
+        else //unknown mdoe
+        {
+          std::cout << "--- test2 [" << modes[i] << "] ---\n";
+          std::string msg = ":" + getServerName() + " 472 " + client.getNickname() + " " + modes[i] + " :is unknown mode char to me\r\n";
+          queueMessage(client.getFd(), msg);
+          continue;
+        }
       }
-      size_t size = static_cast<size_t>(atoi(param.c_str()));
-      channel->setUserLimit(size);
-    }
-    else if (mode == "-l")
-    {
-      channel->setUserLimit(0);
     }
     else //unknown mdoe
     {
-      std::string msg = ":" + getServerName() + " 472 " + client.getNickname() + " " + mode[1] + " :is unknown mode char to me\r\n";
+      std::cout << "--- test3 [" << plusminus << "] ---\n";
+      std::string msg = ":" + getServerName() + " 472 " + client.getNickname() + " " + plusminus + " :is unknown mode char to me\r\n";
       queueMessage(client.getFd(), msg);
       return;
     }
-    std::string msg;
-    if (hasParam)
-      msg = ":" + getPrefix(client) + " MODE " + ch_name + " " + mode + " " + param + "\r\n";
-    else
-      msg = ":" + getPrefix(client) + " MODE " + ch_name + " " + mode + "\r\n";
-    queueMessageEverybodyInChannelElse(*channel, msg, -1);
+
+    if (success_change.size() > 1)
+    {
+      std::string msg;
+      if (mode_params.size() != 0)
+      {
+        msg = ":" + getPrefix(client) + " MODE " + ch_name + " " + success_change;
+        for (unsigned long i = 0; i < mode_params.size(); i++)
+          msg.append(" " + mode_params[i]);
+        msg.append("\r\n");
+      }
+      else
+        msg = ":" + getPrefix(client) + " MODE " + ch_name + " " + success_change + "\r\n";
+      queueMessageEverybodyInChannelElse(*channel, msg, -1);
+    }
   }
 
   void handleCommandInvite(Client& client, const std::string& params)
