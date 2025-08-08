@@ -10,7 +10,7 @@ NAME = ircserv
 SRCS = main.cpp utils.cpp Client.cpp Channel.cpp
 OBJS = $(SRCS:.cpp=.o)
 DEPS = $(SRCS:.cpp=.d)
-HEADERS = Client.hpp
+HEADERS = utils.hpp Client.hpp  Channel.hpp
 
 DOCKER_COMPOSE = docker compose
 DOCKERFILE = Dockerfile.txt
@@ -83,5 +83,11 @@ docker-client:
 
 .PHONY: docker-all
 docker-all: all docker-build docker-up
+
+## 提出
+.PHONY: submit
+submit:
+	@mkdir -p ../submit
+	$(CP) --parents $(SRCS) $(HEADERS) Makefile ../submit
 
 -include $(DEPS)
