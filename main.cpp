@@ -528,19 +528,25 @@ void handleCommandJoin(Client& client, const std::string& params) {
   //parse
 	std::string client_res_msg;
 
-	size_t pos = params.find(' ');
-	std::string left;
-	std::string right;
-	if (pos != std::string::npos)
-	{
-		left = params.substr(0, pos);
-		right = params.substr(pos + 1);
-	}
-	else
-	{
-		left = params;
-		right = "";
-	}
+  std::vector<std::string> channels_and_keys = str_split_to_vector(params, ' ');
+  std::string left;
+  std::string right;
+  if (channels_and_keys.size() == 1)
+  {
+	  left = channels_and_keys[0];
+    right = "";
+  }
+  else if (channels_and_keys.size() == 2)
+  {
+    std::string left = channels_and_keys[0];
+	  std::string right = channels_and_keys[1];
+  }
+  else
+  {
+    std::cout << "test " << channels_and_keys.size();
+    notEnoughParams(client, "JOIN");
+    return;
+  }
 
 	std::vector<std::string> ch_names = str_split_to_vector(left, ',');
 	std::vector<std::string> ch_keys = str_split_to_vector(right, ',');
@@ -652,27 +658,23 @@ void handleCommandJoin(Client& client, const std::string& params) {
     std::string leaveMsg;
     bool hasMsg = false;
 
-    size_t pos = params.find(' ');
-    if (pos != std::string::npos)
+    std::vector<std::string> vec = str_split_to_vector(params, ' ');
+    if (vec.size() == 1)
     {
-      std::string channels_str = params.substr(0, pos);
-      leaveMsg = params.substr(pos + 1);
-      if (leaveMsg[0] == ':')
-        leaveMsg.erase(0, 1);
-      channels = str_split_to_vector(channels_str, ',');
-      hasMsg = true;
-    }
-    else
-    {
-      channels = str_split_to_vector(params, ',');
+      channels = str_split_to_vector(vec[0], ',');
       leaveMsg = "";
     }
-    if (channels.size() < 1)
+    else if (vec.size() == 2)
+    {
+      channels = str_split_to_vector(vec[0], ',');
+      leaveMsg = vec[1];
+    }
+    else
     {
       notEnoughParams(client, "PART");
       return;
     }
-    //
+
 
     std::vector<std::string>::iterator it = channels.begin();
     std::vector<std::string>::iterator ite = channels.end();
@@ -711,30 +713,15 @@ void handleCommandJoin(Client& client, const std::string& params) {
   void handlePrivmsg(Client& client, const std::string& params)
   {
     std::string noMsgError = ":" + getServerName() + " 412 " + client.getNickname() + " :No text to send\r\n";
-    //parse
-    size_t pos = params.find(' ');
-    std::string left;
-    std::string right;
-    
-    if (pos != std::string::npos)
-    {
-      left = params.substr(0, pos);
-      if (pos + 1 < params.size() && params[pos + 1] == ':')
-        right = params.substr(pos + 2);
-      else
-        right = params.substr(pos + 1);
-      if (right.empty()) //no message
-      {
-        queueMessage(client.getFd(), noMsgError);
-        return;
-      }
-    }
-    else // no message
+    // parse
+    std::vector<std::string> vec = str_split_to_vector(params, ' ');
+    if (vec.size() < 2) // no message
     {
       queueMessage(client.getFd(), noMsgError);
       return;
     }
-    //
+    std::string left = vec[0];
+    std::string right = vec[1];
 
     if (Channel::isChannelFirstCharacter(left[0])) //message to channel
     {
