@@ -1,5 +1,5 @@
-MAKE := MAKE $(MAKEFLAGS)
-MAKEFLAGS += -rR
+MAKE := make -$(MAKEFLAGS)
+MAKEFLAGS += rR
 RM = rm -rf
 CP = cp -r
 

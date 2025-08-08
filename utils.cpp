@@ -1,7 +1,5 @@
 #include "utils.hpp"
 
-
-#include <iostream>
 std::vector<std::string> str_split_to_vector(const std::string& str, char delimiter) {
     std::vector<std::string> result;
     std::stringstream ss(str);
@@ -24,4 +22,15 @@ std::vector<std::string> str_split_to_vector(const std::string& str, char delimi
         }
     }
     return result;
+}
+
+bool strIsPosDigit(const std::string& str)
+{
+    size_t size = str.size();
+    for (size_t i = 0; i < size; i++)
+    {
+        if (!isdigit(str[i]))
+            return (false);
+    }
+    return (true);
 }

@@ -898,20 +898,13 @@ void handleCommandJoin(Client& client, const std::string& params) {
             notEnoughParams(client, "MODE");
             continue;
           }
-          bool notDigit = false;
-          for (unsigned long j = 0; j < paramit->size(); j++)
+          if (!strIsPosDigit(*paramit)) //check if digit
           {
-            if (!isdigit((*paramit)[j]))
-            {
-              std::string msg = ":" + getServerName() + " 461 " + client.getNickname() + " " + "MODE" + " :Invalid parameter " + *paramit + "\r\n";
-              queueMessage(client.getFd(), msg);
-              paramit++;
-              notDigit = true;
-              break;
-            }
-          }
-          if (notDigit)
+            std::string msg = ":" + getServerName() + " 461 " + client.getNickname() + " " + "MODE" + " :Invalid parameter " + *paramit + "\r\n";
+            queueMessage(client.getFd(), msg);
+            paramit++;
             continue;
+          }
           size_t size = static_cast<size_t>(atoi((*paramit).c_str()));
           channel->setUserLimit(size);
           success_change.push_back('l');
@@ -1314,6 +1307,11 @@ int main(int argc, char* argv[]) {
   }
 
   int port = atoi(argv[1]); // atoi is in the global namespace
+  if (!strIsPosDigit(argv[1]) || (port < 1023 || port > 65535))
+  {
+    std::cerr << "Port must be numeric positive number ( 1023~65535 )" << std::endl;
+    return (1);
+  }
   std::string password = argv[2];
 
   IrcServer server(port, password);
